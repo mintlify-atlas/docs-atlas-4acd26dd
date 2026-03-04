@@ -1,0 +1,291 @@
+---
+title: Managing Calendars
+description: Control calendar visibility, sync settings, and manage multiple Google accounts
+icon: calendars
+---
+
+Chronos Calendar automatically syncs all calendars from your connected Google accounts. You have full control over which calendars are visible and can manage multiple Google accounts simultaneously.
+
+## Calendar Visibility Panel
+
+The calendar visibility panel is your central hub for managing which calendars appear in your view.
+
+### Accessing the Visibility Panel
+
+<Steps>
+  <Step title="Locate the Calendar Chip">
+    Look for the colorful calendar chip in the top-right area of the calendar view. It displays:
+    - Colored dots representing your visible calendars (up to 5)
+    - A count badge showing the total number of visible calendars
+    - A dropdown chevron icon
+  </Step>
+
+  <Step title="Open the Panel">
+    Click the calendar chip to open the visibility panel. The panel displays all your connected Google accounts and their calendars organized hierarchically.
+  </Step>
+
+  <Step title="Browse Your Calendars">
+    Each Google account can be expanded or collapsed to show its calendars. Accounts are identified by their email address.
+  </Step>
+</Steps>
+
+<Tip>
+  The calendar chip shows a preview of up to 5 calendar colors. If you have more visible calendars, you'll see a "+X" badge indicating the additional count.
+</Tip>
+
+## Showing and Hiding Calendars
+
+Control which calendars appear in your calendar view:
+
+<Steps>
+  <Step title="Open the Visibility Panel">
+    Click the calendar chip to open the calendar visibility panel.
+  </Step>
+
+  <Step title="Expand an Account">
+    Click on any Google account email to expand and view all calendars for that account. The chevron icon indicates whether the account is expanded or collapsed.
+  </Step>
+
+  <Step title="Toggle Calendar Visibility">
+    Click the checkbox next to any calendar name to show or hide it:
+    - **Checked** - Calendar is visible and events will appear in your view
+    - **Unchecked** - Calendar is hidden and events won't be displayed
+    
+    The checkbox displays the calendar's color when checked.
+  </Step>
+
+  <Step title="View Changes Immediately">
+    Changes take effect instantly. Events from hidden calendars disappear from your view, while events from newly visible calendars appear immediately.
+  </Step>
+</Steps>
+
+<Note>
+  Hiding a calendar only affects your view in Chronos Calendar. The calendar and its events remain unchanged in your Google Calendar account.
+</Note>
+
+## Understanding Calendar Properties
+
+### Calendar Colors
+
+Each calendar has an associated color:
+- Colors are synced from your Google Calendar settings
+- The color appears as a dot next to the calendar name
+- Events from that calendar display with a colored border matching the calendar color
+- Calendar colors help you visually distinguish events at a glance
+
+### Primary Calendar
+
+Your primary Google Calendar is marked with a "PRIMARY" badge:
+- This is your main calendar in Google Calendar
+- New events are typically created in your primary calendar by default
+- Each Google account has one primary calendar
+
+### Calendar Hierarchy
+
+```
+📧 user@gmail.com
+  ├─ 📅 Personal (Primary)
+  ├─ 📅 Work
+  └─ 📅 Holidays
+
+📧 work@company.com
+  ├─ 📅 Calendar (Primary)
+  ├─ 📅 Team Events
+  └─ 📅 Meetings
+```
+
+Calendars are organized by account, making it easy to manage calendars from multiple Google accounts.
+
+## Managing Multiple Google Accounts
+
+Chronos Calendar supports connecting multiple Google accounts to view all your calendars in one place.
+
+### Adding a Google Account
+
+<Steps>
+  <Step title="Open the Visibility Panel">
+    Click the calendar chip to open the visibility panel.
+  </Step>
+
+  <Step title="Click 'Add Google Account'">
+    At the bottom of the visibility panel, click the "Add Google Account" button with the plus icon.
+  </Step>
+
+  <Step title="Authorize the New Account">
+    You'll be redirected to Google OAuth to sign in with another Google account:
+    - Sign in with the Google account you want to add
+    - Grant calendar permissions
+    - You'll be redirected back to Chronos Calendar
+  </Step>
+
+  <Step title="Access New Calendars">
+    The new account and all its calendars will appear in your visibility panel. By default, all calendars from the new account are visible.
+  </Step>
+</Steps>
+
+<Tip>
+  Adding multiple accounts is perfect for users who maintain separate personal and work calendars, or need to manage calendars across different organizations.
+</Tip>
+
+### Switching Between Accounts
+
+With multiple connected accounts:
+- All calendars from all accounts appear together in your calendar view
+- Use the visibility panel to show/hide specific calendars
+- You can create events in any calendar from any connected account
+- Each account maintains its own authentication and sync status
+
+### Account Reauthorization
+
+If an account needs reauthorization, you'll see a warning indicator:
+
+<Warning>
+  When you see an **alert circle icon** (⚠️) next to an account email, it means the account needs to be reauthorized:
+  - OAuth tokens may have expired
+  - Permissions may have been revoked
+  - There may be a sync error
+  
+  To fix this, disconnect and reconnect the account through Settings.
+</Warning>
+
+## Calendar Sync
+
+Chronos Calendar uses real-time synchronization to keep your calendars up to date.
+
+### How Sync Works
+
+1. **Initial Sync** - When you connect a Google account, all calendars and events are downloaded
+2. **Real-time Updates** - Changes are synced using Google Calendar's push notifications and polling
+3. **Bi-directional Sync** - Changes in Chronos Calendar sync to Google, and vice versa
+4. **Incremental Sync** - Only changed events are updated to minimize bandwidth
+
+### What Gets Synced
+
+<AccordionGroup>
+  <Accordion title="Calendars">
+    - Calendar names
+    - Calendar colors
+    - Primary calendar designation
+    - Calendar time zones
+    - Visibility settings (per-calendar)
+  </Accordion>
+
+  <Accordion title="Events">
+    - Event titles and descriptions
+    - Start and end times
+    - All-day events
+    - Event locations
+    - Event colors
+    - Recurrence rules
+    - Attendees and guest lists
+  </Accordion>
+
+  <Accordion title="Not Synced">
+    - Todo items (stored locally in Chronos)
+    - Calendar visibility preferences (specific to Chronos)
+    - UI preferences and settings
+  </Accordion>
+</AccordionGroup>
+
+### Sync Status
+
+To check if your calendars are syncing properly:
+- Events should appear within seconds of being created in Google Calendar
+- Changes made in Chronos Calendar appear immediately in Google Calendar
+- If sync stops, check for the reauthorization warning icon
+
+<Note>
+  Google Calendar API has rate limits. If you make a very large number of changes quickly, some updates may be delayed by a few seconds.
+</Note>
+
+## Removing Google Accounts
+
+To disconnect a Google account from Chronos Calendar:
+
+<Steps>
+  <Step title="Open Settings">
+    Click your profile picture in the bottom-left corner and select "Settings".
+  </Step>
+
+  <Step title="Navigate to Connected Accounts">
+    In the Settings panel, find the "Connected Accounts" section.
+  </Step>
+
+  <Step title="Remove the Account">
+    Click the delete/remove button next to the account you want to disconnect.
+  </Step>
+
+  <Step title="Confirm Removal">
+    Confirm that you want to remove the account. All calendars and events from that account will be removed from your Chronos Calendar view.
+  </Step>
+</Steps>
+
+<Warning>
+  Removing a Google account from Chronos Calendar:
+  - Removes all calendars and events from that account from your view
+  - Revokes Chronos Calendar's access tokens for that account
+  - Does NOT delete any data from your Google Calendar
+  - Does NOT automatically revoke permissions in your Google Account (do this manually via Google Account settings)
+</Warning>
+
+## Best Practices
+
+<CardGroup cols={2}>
+  <Card title="Use Color Coding" icon="palette">
+    Leverage calendar colors to quickly identify events from different calendars. Keep related calendars in similar color families.
+  </Card>
+  
+  <Card title="Hide Inactive Calendars" icon="eye-slash">
+    Hide calendars you don't need to see regularly to reduce visual clutter. You can always show them again when needed.
+  </Card>
+  
+  <Card title="Organize by Account" icon="folder-tree">
+    When adding multiple accounts, collapse account sections you're not actively using to keep the visibility panel clean.
+  </Card>
+  
+  <Card title="Regular Sync Checks" icon="arrows-rotate">
+    Periodically check for the reauthorization warning icon to ensure all your calendars are syncing properly.
+  </Card>
+</CardGroup>
+
+## Troubleshooting Calendar Issues
+
+### Calendar Not Appearing
+
+1. Check if the account is expanded in the visibility panel
+2. Verify the calendar is checked/visible
+3. Check for a reauthorization warning on the account
+4. Refresh the page to trigger a manual sync
+
+### Events Not Syncing
+
+1. Look for the reauthorization warning icon (⚠️) next to the account
+2. Check your internet connection
+3. Verify the calendar is still visible in the visibility panel
+4. Try disconnecting and reconnecting the account
+
+### Wrong Calendar Colors
+
+- Calendar colors are synced from Google Calendar
+- To change a calendar's color, update it in Google Calendar
+- The change will sync to Chronos Calendar automatically
+
+### Loading Indicator Stuck
+
+If the visibility panel shows "Loading..." indefinitely:
+1. Close and reopen the visibility panel
+2. Refresh the browser page
+3. Check the browser console for error messages
+4. Try signing out and back in
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Creating Events" icon="calendar-plus" href="/guide/creating-events">
+    Learn how to create and edit events across your calendars
+  </Card>
+  
+  <Card title="Organizing Todos" icon="list-check" href="/guide/organizing-todos">
+    Explore the todo system to manage tasks alongside your calendar
+  </Card>
+</CardGroup>

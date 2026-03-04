@@ -1,0 +1,307 @@
+---
+title: 'Reorder Todos'
+description: 'Reorder todo items and categories with drag-and-drop'
+---
+
+## Overview
+
+Chronos Calendar provides dedicated endpoints for reordering both todo items and categories. This enables efficient bulk reordering operations, typically triggered by drag-and-drop interactions in the UI.
+
+**Authentication**: All endpoints require authentication via Bearer token.
+
+---
+
+## Reorder Todo Items
+
+<Card title="POST /todos/reorder" icon="grip-lines">
+  Reorder all todo items in a single operation
+</Card>
+
+### Request Body
+
+<ParamField body="todoIds" type="array" required>
+  Array of todo item UUIDs in the desired display order
+</ParamField>
+
+### Response
+
+<ResponseField name="message" type="string">
+  Confirmation message: "Reordered"
+</ResponseField>
+
+### Example Request
+
+```bash
+curl -X POST https://api.chronoscalendar.com/todos/reorder \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "todoIds": [
+      "abc12345-6789-def0-1234-56789abcdef0",
+      "def67890-abcd-1234-5678-90abcdef1234",
+      "new12345-6789-abcd-ef01-234567890abc"
+    ]
+  }'
+```
+
+### Example Response
+
+```json
+{
+  "message": "Reordered"
+}
+```
+
+### Behavior
+
+<Info>
+  **Order Assignment**: Todos are assigned sequential order values starting from 0.
+  - First UUID in array → `order: 0`
+  - Second UUID in array → `order: 1`
+  - Third UUID in array → `order: 2`
+  - And so on...
+</Info>
+
+### Use Cases
+
+<AccordionGroup>
+  <Accordion title="Drag-and-Drop Reordering">
+    When a user drags a todo item to a new position, send all visible todo IDs in the new order.
+    
+    ```javascript
+    // After user drops item
+    const reorderedIds = visibleTodos.map(todo => todo.id);
+    await fetch('/todos/reorder', {
+      method: 'POST',
+      body: JSON.stringify({ todoIds: reorderedIds })
+    });
+    ```
+  </Accordion>
+
+  <Accordion title="Sorting Todos">
+    When applying a sort (e.g., by scheduled date or alphabetically), send the sorted IDs to persist the new order.
+    
+    ```javascript
+    // Sort by scheduled date
+    const sorted = todos
+      .sort((a, b) => new Date(a.scheduledDate) - new Date(b.scheduledDate))
+      .map(todo => todo.id);
+    await fetch('/todos/reorder', {
+      method: 'POST',
+      body: JSON.stringify({ todoIds: sorted })
+    });
+    ```
+  </Accordion>
+
+  <Accordion title="Moving Completed Items to Bottom">
+    Automatically reorder to place completed items at the bottom of the list.
+    
+    ```javascript
+    const incomplete = todos.filter(t => !t.completed).map(t => t.id);
+    const complete = todos.filter(t => t.completed).map(t => t.id);
+    const reordered = [...incomplete, ...complete];
+    await fetch('/todos/reorder', {
+      method: 'POST',
+      body: JSON.stringify({ todoIds: reordered })
+    });
+    ```
+  </Accordion>
+</AccordionGroup>
+
+---
+
+## Reorder Categories
+
+<Card title="POST /todos/todo-lists/reorder" icon="arrows-up-down">
+  Reorder all todo list categories in a single operation
+</Card>
+
+### Request Body
+
+<ParamField body="categoryIds" type="array" required>
+  Array of category (todo list) UUIDs in the desired display order
+</ParamField>
+
+### Response
+
+<ResponseField name="message" type="string">
+  Confirmation message: "Reordered"
+</ResponseField>
+
+### Example Request
+
+```bash
+curl -X POST https://api.chronoscalendar.com/todos/todo-lists/reorder \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "categoryIds": [
+      "987fcdeb-51a2-43f1-b123-456789abcdef",
+      "123e4567-e89b-12d3-a456-426614174000",
+      "456e7890-e12b-34d5-a678-901234567890"
+    ]
+  }'
+```
+
+### Example Response
+
+```json
+{
+  "message": "Reordered"
+}
+```
+
+### Behavior
+
+Categories are assigned sequential order values starting from 0, identical to todo item reordering.
+
+---
+
+## Implementation Details
+
+### Database Updates
+
+Both reorder endpoints use the same underlying mechanism:
+
+1. Accept an array of UUIDs in the desired order
+2. Iterate through the array with index enumeration
+3. Update each item's `order` field to match its array index
+4. Verify user ownership before updating (security check)
+
+**Source**: `/home/daytona/workspace/source/backend/app/routers/todos.py:64`
+
+```python
+def reorder_items(supabase, table: str, user_id: str, item_ids: list[UUID]):
+    for index, item_id in enumerate(item_ids):
+        (
+            supabase.table(table)
+            .update({"order": index})
+            .eq("id", str(item_id))
+            .eq("user_id", user_id)
+            .execute()
+        )
+```
+
+### Security
+
+<Warning>
+  **User Isolation**: The `.eq("user_id", user_id)` clause ensures users can only reorder their own items. Attempting to reorder items belonging to other users will silently fail (no update occurs).
+</Warning>
+
+### Performance Considerations
+
+<Note>
+  **Batch Operations**: Currently, each item is updated individually in a loop. For large lists (100+ items), this may result in slower response times. Consider limiting the number of items reordered in a single operation.
+</Note>
+
+---
+
+## Error Responses
+
+### Validation Errors
+
+<Expandable title="422 Unprocessable Entity">
+  **Invalid UUID Format**
+  
+  Returned when the array contains invalid UUID strings.
+  
+  ```json
+  {
+    "detail": [
+      {
+        "loc": ["body", "todoIds", 0],
+        "msg": "value is not a valid uuid",
+        "type": "type_error.uuid"
+      }
+    ]
+  }
+  ```
+</Expandable>
+
+<Expandable title="400 Bad Request">
+  **Empty Array**
+  
+  While not explicitly validated, sending an empty array will succeed but perform no updates.
+  
+  ```json
+  {
+    "todoIds": []
+  }
+  ```
+  
+  Response: `{"message": "Reordered"}` (no-op)
+</Expandable>
+
+---
+
+## Best Practices
+
+<Steps>
+  <Step title="Send Complete List">
+    Always send the complete list of item IDs that should be reordered. Partial lists will only update the included items, potentially creating gaps in the order sequence.
+  </Step>
+  
+  <Step title="Filter by User Context">
+    Only include items owned by the authenticated user. The API will ignore items from other users, but sending them wastes bandwidth.
+  </Step>
+  
+  <Step title="Optimistic UI Updates">
+    Update the UI immediately (optimistically) before the API call completes. Revert on error.
+    
+    ```javascript
+    // Optimistic update
+    const previousOrder = [...todos];
+    setTodos(newOrder);
+    
+    try {
+      await reorderTodos(newOrder.map(t => t.id));
+    } catch (error) {
+      // Revert on failure
+      setTodos(previousOrder);
+      showError('Failed to reorder');
+    }
+    ```
+  </Step>
+  
+  <Step title="Debounce Rapid Changes">
+    If users can rapidly reorder items (e.g., multiple drag operations), debounce the API calls to avoid overwhelming the server.
+    
+    ```javascript
+    const debouncedReorder = debounce(async (ids) => {
+      await fetch('/todos/reorder', {
+        method: 'POST',
+        body: JSON.stringify({ todoIds: ids })
+      });
+    }, 500);
+    ```
+  </Step>
+</Steps>
+
+---
+
+## Related Endpoints
+
+<CardGroup cols={2}>
+  <Card title="Todo Items" icon="check" href="/api/todos/items">
+    Full CRUD operations for todo items
+  </Card>
+  <Card title="Todo Lists" icon="list" href="/api/todos/lists">
+    Manage categories and lists
+  </Card>
+  <Card title="Update Todo" icon="pen" href="/api/todos/items#update-todo-item">
+    Update individual todo order
+  </Card>
+  <Card title="Update List" icon="pen" href="/api/todos/lists#update-todo-list">
+    Update individual category order
+  </Card>
+</CardGroup>
+
+---
+
+## Rate Limiting
+
+All reorder endpoints are subject to the API rate limit configured in application settings. Exceeding the rate limit will return a `429 Too Many Requests` response.
+
+<Tip>
+  To avoid rate limiting during drag-and-drop operations, implement debouncing or only send the reorder request when the user finishes dragging (on drop event, not on every position change).
+</Tip>

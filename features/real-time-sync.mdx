@@ -1,0 +1,647 @@
+---
+title: 'Real-Time Sync'
+description: 'Live updates using Server-Sent Events (SSE) and smart polling'
+---
+
+## Overview
+
+Chronos Calendar provides real-time synchronization using Server-Sent Events (SSE) for live updates during active syncs, complemented by smart polling and webhook-based notifications. This ensures your calendar is always up-to-date without manual intervention.
+
+## Server-Sent Events (SSE)
+
+### What is SSE?
+
+Server-Sent Events is a standard allowing servers to push updates to the browser over a single HTTP connection:
+
+- **One-Way Communication**: Server → Client
+- **Automatic Reconnection**: Built into browsers
+- **Text-Based Protocol**: Simple, human-readable
+- **Efficient**: Single connection for multiple updates
+
+<Info>
+  Unlike WebSockets, SSE uses standard HTTP and works through most proxies and firewalls without configuration.
+</Info>
+
+### SSE Stream Endpoint
+
+```python
+# From calendar.py:148-223
+@router.get("/sync")
+async def sync_calendars(
+    current_user: CurrentUser,
+    supabase: SupabaseClientDep,
+    http: HttpClient,
+    calendar_ids: str = Query(...),
+):
+    async def event_generator():
+        events_queue: asyncio.Queue = asyncio.Queue()
+        total_events = 0
+        fetch_tasks: list[asyncio.Task] = []
+        fetch_semaphore = asyncio.Semaphore(MAX_CONCURRENT_CALENDAR_FETCHES)
+
+        for cid in calendar_id_list:
+            fetch_tasks.append(asyncio.create_task(
+                sync_events(http, supabase, user_id, cid, events_queue, fetch_semaphore)
+            ))
+
+        # Stream events as they arrive
+        while calendars_done < len(calendar_id_list):
+            item = await asyncio.wait_for(events_queue.get(), timeout=15)
+            if item["type"] == "events":
+                total_events += len(item["events"])
+                yield format_sse("events", item)
+            elif item["type"] == "sync_token":
+                yield format_sse("sync_token", item)
+            elif item["type"] == "error":
+                yield format_sse("sync_error", item)
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
+```
+
+### SSE Message Types
+
+<Tabs>
+  <Tab title="events">
+    Batch of calendar events:
+
+    ```json
+    {
+      "type": "events",
+      "calendar_id": "cal_123",
+      "events": [
+        { "id": "evt_1", "summary": "Meeting", ... },
+        { "id": "evt_2", "summary": "Lunch", ... }
+      ]
+    }
+    ```
+
+    Events are immediately stored in IndexedDB and displayed.
+  </Tab>
+
+  <Tab title="sync_token">
+    Calendar sync completed:
+
+    ```json
+    {
+      "type": "sync_token",
+      "calendar_id": "cal_123"
+    }
+    ```
+
+    Indicates this calendar has finished syncing.
+  </Tab>
+
+  <Tab title="sync_error">
+    Error occurred:
+
+    ```json
+    {
+      "type": "sync_error",
+      "calendar_id": "cal_123",
+      "code": "403",
+      "message": "Access forbidden",
+      "retryable": false
+    }
+    ```
+
+    Displays error to user with retry option if `retryable: true`.
+  </Tab>
+
+  <Tab title="complete">
+    All calendars synced:
+
+    ```json
+    {
+      "type": "complete",
+      "total_events": 247,
+      "calendars_synced": 3,
+      "last_sync_at": "2024-03-15T14:30:00Z"
+    }
+    ```
+
+    Final message indicating sync completion.
+  </Tab>
+</Tabs>
+
+## Client-Side SSE Handling
+
+### EventSource API
+
+```typescript
+// From useCalendarSync.ts:136-243
+const syncPromise = new Promise<void>((resolve, reject) => {
+  const eventSource = new EventSource(url, { withCredentials: true })
+  eventSourceRef.current = eventSource
+
+  let eventsLoaded = 0
+  let calendarsComplete = 0
+
+  eventSource.onopen = () => {
+    connectionOpened = true
+  }
+
+  eventSource.addEventListener("events", async (e) => {
+    const payload: SSEEventsPayload = JSON.parse(e.data)
+    await processEvents(payload)
+    eventsLoaded += payload.events.length
+    setProgress((p) => ({ ...p, eventsLoaded }))
+    setIsLoading(false)
+  })
+
+  eventSource.addEventListener("sync_token", () => {
+    calendarsComplete++
+    setProgress((p) => ({ ...p, calendarsComplete }))
+  })
+
+  eventSource.addEventListener("complete", async (e) => {
+    const payload = JSON.parse(e.data)
+    eventSource.close()
+    const syncedAt = payload.last_sync_at ? new Date(payload.last_sync_at) : new Date()
+    await setLastSyncAt(syncedAt)
+    completeSync()
+    resolve()
+  })
+
+  eventSource.onerror = () => {
+    if (eventSource.readyState === EventSource.CLOSED) {
+      failSync(reject, "SSE connection closed", "Connection lost")
+    }
+  }
+})
+```
+
+### Progressive Event Processing
+
+```typescript
+// From useCalendarSync.ts:82-95
+const processEvents = useCallback(async (payload: SSEEventsPayload) => {
+  const now = new Date().toISOString();
+  const dexieEvents: DexieEvent[] = payload.events.map((event) =>
+    calendarEventToDexie({
+      ...event,
+      created: event.created || now,
+      updated: event.updated || now,
+    }),
+  );
+
+  if (dexieEvents.length > 0) {
+    await upsertEvents(dexieEvents);  // Store in IndexedDB immediately
+  }
+}, []);
+```
+
+<Note>
+  Events are stored incrementally as they arrive, not batched. This provides instant UI updates during long syncs.
+</Note>
+
+## Automatic Polling
+
+### Background Sync Polling
+
+Periodic sync every 10 minutes:
+
+```typescript
+// From useCalendarSync.ts:411-424
+useEffect(() => {
+  if (!enabled || !calendarIds.length || pollInterval <= 0) return;
+
+  pollRef.current = setInterval(() => {
+    sync().catch(() => {});  // Automatic background sync
+  }, pollInterval);
+
+  return () => {
+    if (pollRef.current) {
+      clearInterval(pollRef.current);
+      pollRef.current = null;
+    }
+  };
+}, [calendarIds.length, enabled, pollInterval, sync]);
+```
+
+<Info>
+  The default poll interval is 10 minutes (600,000ms), but can be configured per use case.
+</Info>
+
+### Smart Polling
+
+Detects server-side updates without full sync:
+
+```typescript
+// From useCalendarSync.ts:426-454
+useEffect(() => {
+  if (!enabled || !calendarIds.length) return;
+
+  smartPollRef.current = setInterval(async () => {
+    if (syncPromiseRef.current) return;  // Don't poll during active sync
+    try {
+      const status = await googleApi.getSyncStatus(calendarIds);
+      const serverTs = status.lastSyncAt
+        ? new Date(status.lastSyncAt).getTime()
+        : 0;
+      
+      // Check if server has newer data
+      if (serverTs > lastKnownSyncRef.current) {
+        lastKnownSyncRef.current = serverTs;
+        await hydrateFromSupabase(calendarIds);  // Fetch from server
+        const serverDate = new Date(serverTs);
+        await setLastSyncAt(serverDate);
+        setLastSyncAtState(serverDate);
+      }
+    } catch {
+      return;
+    }
+  }, 60_000);  // Check every minute
+}, [enabled, calendarIds, hydrateFromSupabase]);
+```
+
+<Accordion title="How smart polling works">
+  1. **Poll Server**: Check `lastSyncAt` timestamp every 60 seconds
+  2. **Compare Timestamps**: Compare with local `lastKnownSyncRef`
+  3. **Detect Changes**: If server timestamp is newer, data has changed
+  4. **Hydrate**: Fetch updated events from Supabase (not Google)
+  5. **Update UI**: IndexedDB triggers automatic re-render
+
+  This detects changes made by webhooks or other devices without polling Google Calendar.
+</Accordion>
+
+## Webhook Notifications
+
+### Webhook Registration
+
+Chronos registers push notification channels with Google Calendar:
+
+```python
+# From sync.py:163-217
+async def _ensure_webhook_channel(
+    http: httpx.AsyncClient,
+    supabase: Client,
+    user_id: str,
+    calendar_id: str,
+    calendar: dict,
+) -> None:
+    settings = get_settings()
+    if not settings.WEBHOOK_BASE_URL:
+        return
+
+    # Check if existing webhook is still valid
+    sync_state = await asyncio.to_thread(get_calendar_sync_state, supabase, calendar_id)
+    if sync_state:
+        expires_at = sync_state.get("webhook_expires_at")
+        if expires_at:
+            buffer = datetime.now(timezone.utc) + timedelta(hours=WEBHOOK_CHANNEL_BUFFER_HOURS)
+            parsed = datetime.fromisoformat(str(expires_at))
+            if parsed.tzinfo is None:
+                parsed = parsed.replace(tzinfo=timezone.utc)
+            if parsed > buffer:
+                return  # Webhook still valid
+
+    # Register new webhook
+    channel_id = str(uuid.uuid4())
+    channel_token = secrets.token_urlsafe(32)
+    webhook_url = f"{settings.WEBHOOK_BASE_URL}/calendar/webhook"
+
+    access_token = await get_valid_access_token(http, supabase, user_id, calendar["google_account_id"])
+    result = await create_watch_channel(
+        http,
+        access_token,
+        calendar["google_calendar_id"],
+        webhook_url,
+        channel_id,
+        channel_token,
+    )
+
+    await asyncio.to_thread(
+        save_webhook_registration,
+        supabase,
+        calendar_id,
+        channel_id,
+        result["resource_id"],
+        result["expires_at"],
+        channel_token,
+    )
+```
+
+<Note>
+  Webhooks are automatically renewed before expiration (with a buffer period) to maintain continuous push notifications.
+</Note>
+
+### Webhook Receiver
+
+```python
+# From calendar.py:226-253
+@router.post("/webhook")
+async def receive_webhook(request: Request):
+    channel_id = request.headers.get("X-Goog-Channel-Id")
+    if not channel_id:
+        raise HTTPException(status_code=400, detail="Missing channel ID")
+
+    supabase = get_supabase_client()
+    sync_state = await asyncio.to_thread(get_sync_state_by_channel_id, supabase, channel_id)
+    if not sync_state:
+        return {}  # Unknown channel, ignore
+
+    # Verify webhook token
+    expected_token = sync_state.get("webhook_channel_token")
+    actual_token = request.headers.get("X-Goog-Channel-Token")
+    if not hmac.compare_digest(actual_token or "", expected_token or ""):
+        logger.warning("Webhook token mismatch for channel %s", channel_id)
+        raise HTTPException(status_code=401, detail="Invalid token")
+
+    resource_state = request.headers.get("X-Goog-Resource-State")
+    logger.info("Webhook received: channel=%s state=%s", channel_id, resource_state)
+
+    if resource_state == "sync":
+        return {}  # Ignore sync messages (initial registration)
+
+    calendar_id = sync_state["google_calendar_id"]
+    user_id = sync_state["google_calendars"]["google_accounts"]["user_id"]
+
+    handle_webhook_notification(calendar_id, user_id)  # Trigger sync
+    return {}
+```
+
+<CardGroup cols={2}>
+  <Card title="Security" icon="lock">
+    Webhooks verified using HMAC token comparison
+  </Card>
+  <Card title="Channel Tracking" icon="hashtag">
+    Each webhook has unique channel ID and resource ID
+  </Card>
+  <Card title="Automatic Renewal" icon="arrows-rotate">
+    Channels renewed before expiration
+  </Card>
+  <Card title="Background Sync" icon="cloud-arrow-down">
+    Webhooks trigger background sync without user interaction
+  </Card>
+</CardGroup>
+
+## Hydration from Supabase
+
+Fast-path loading from server database:
+
+```typescript
+// From useCalendarSync.ts:260-280
+const hydrateFromSupabase = useCallback(async (ids: string[]) => {
+  const response = await googleApi.getEvents(ids);
+  const allEvents = [
+    ...response.events,
+    ...response.masters,
+    ...response.exceptions,
+  ];
+
+  const dexieEvents: DexieEvent[] = allEvents.map((event) =>
+    calendarEventToDexie(event),
+  );
+
+  await db.transaction("rw", db.events, async () => {
+    await db.events.where("calendarId").anyOf(ids).delete();  // Clear old
+    if (dexieEvents.length > 0) {
+      await db.events.bulkPut(dexieEvents);  // Insert new
+    }
+  });
+
+  return { count: dexieEvents.length };
+}, []);
+```
+
+<Info>
+  Hydration fetches from Supabase (fast) instead of Google Calendar API (slow), making it ideal for frequent polling.
+</Info>
+
+## Initial Sync Strategy
+
+### Foreground Sync on First Load
+
+```typescript
+// From useCalendarSync.ts:282-356
+const refreshFromSupabaseAndMaybeSync = useCallback(
+  async (opts: { ids: string[]; allowForegroundSync: boolean }) => {
+    const { ids, allowForegroundSync } = opts;
+
+    // Show existing local data immediately
+    const existingLocalCount = await db.events
+      .where("calendarId")
+      .anyOf(ids)
+      .count();
+    if (existingLocalCount > 0) {
+      setIsLoading(false);
+    }
+
+    // Hydrate from Supabase
+    let hydratedCount = 0;
+    try {
+      const hydrated = await hydrateFromSupabase(ids);
+      hydratedCount = hydrated.count;
+    } catch (e) {
+      console.error("Error hydrating from Supabase:", e);
+    }
+
+    // Check server sync status
+    let serverLastSyncAt: Date | null = null;
+    try {
+      const status = await googleApi.getSyncStatus(ids);
+      serverLastSyncAt = status.lastSyncAt ? new Date(status.lastSyncAt) : null;
+    } catch (e) {
+      console.error("Error fetching sync status:", e);
+    }
+
+    const noDataYet = hydratedCount === 0 && existingLocalCount === 0;
+
+    // If no data exists, do foreground sync with retries
+    if (allowForegroundSync && noDataYet) {
+      setIsLoading(true);
+      for (let attempt = 0; attempt < MAX_FOREGROUND_SYNC_ATTEMPTS; attempt += 1) {
+        try {
+          await sync();
+          return;
+        } catch (error) {
+          if (attempt < MAX_FOREGROUND_SYNC_ATTEMPTS - 1) {
+            const retryDelayMs = FOREGROUND_SYNC_RETRY_DELAY_MS * 2 ** attempt;
+            await new Promise((resolve) => setTimeout(resolve, retryDelayMs));
+            continue;
+          }
+          setError("Unable to sync right now. Please try again.");
+          setIsLoading(false);
+          return;
+        }
+      }
+    }
+
+    // Otherwise, background sync
+    setIsLoading(false);
+    sync().catch(() => {});
+  },
+  [hydrateFromSupabase, setError, sync],
+);
+```
+
+<Accordion title="Sync decision tree">
+  1. **Check Local Data**: Does IndexedDB have events?
+     - Yes → Show immediately, skip to step 3
+     - No → Continue to step 2
+
+  2. **Hydrate from Supabase**: Fetch events from server
+     - Found data → Display, skip to step 3
+     - No data → Continue to step 3
+
+  3. **Check Sync Status**: Query server for `lastSyncAt`
+     - Has timestamp → Background sync
+     - No timestamp + no data → Foreground sync with retries
+
+  This ensures users see data as quickly as possible.
+</Accordion>
+
+## Connection Management
+
+### Keep-Alive Messages
+
+```typescript
+// From calendar.py:186-190
+try:
+    item = await asyncio.wait_for(events_queue.get(), timeout=15)
+except asyncio.TimeoutError:
+    yield ": keep-alive\n\n"  // Prevent connection timeout
+    continue
+```
+
+Empty SSE comments keep the connection alive during slow syncs.
+
+### Timeout Handling
+
+```python
+# From calendar.py:42-43
+MAX_SYNC_DURATION_SECONDS = 300  # 5 minutes
+
+# From calendar.py:182-184
+if asyncio.get_running_loop().time() - sync_start > MAX_SYNC_DURATION_SECONDS:
+    yield format_sse("sync_error", {"code": "408", "message": "Sync timed out"})
+    break
+```
+
+Syncs are automatically cancelled after 5 minutes to prevent hung connections.
+
+### Rate Limiting
+
+```python
+# From calendar.py:43-45
+SYNC_RATE_LIMIT_SECONDS = 5
+
+_sync_rate_limits: TTLCache = TTLCache(maxsize=1024, ttl=SYNC_RATE_LIMIT_SECONDS)
+
+# From calendar.py:157-159
+if user_id in _sync_rate_limits:
+    raise HTTPException(status_code=429, detail="Sync rate limit exceeded. Please wait before syncing again.")
+_sync_rate_limits[user_id] = True
+```
+
+<Note>
+  Users can only trigger manual syncs once every 5 seconds to prevent abuse.
+</Note>
+
+## Cleanup and Cancellation
+
+### Component Unmount
+
+```typescript
+// From useCalendarSync.ts:360-369
+useEffect(() => {
+  return () => {
+    closeEventSource();
+    if (rejectSyncRef.current) {
+      rejectSyncRef.current(new Error("Component unmounted"));
+      rejectSyncRef.current = null;
+    }
+    syncPromiseRef.current = null;
+  };
+}, [closeEventSource]);
+```
+
+SSE connections are properly closed when component unmounts.
+
+### Manual Stop
+
+```typescript
+// From useCalendarSync.ts:371-389
+useEffect(() => {
+  if (!shouldStop) return;
+
+  closeEventSource();
+  if (rejectSyncRef.current) {
+    rejectSyncRef.current(new Error("Sync stopped"));
+    rejectSyncRef.current = null;
+  }
+  syncPromiseRef.current = null;
+  if (pollRef.current) {
+    clearInterval(pollRef.current);
+    pollRef.current = null;
+  }
+  if (smartPollRef.current) {
+    clearInterval(smartPollRef.current);
+    smartPollRef.current = null;
+  }
+  resetStopFlag();
+}, [shouldStop, resetStopFlag, closeEventSource]);
+```
+
+Users can manually cancel syncs via the UI.
+
+## Performance Characteristics
+
+<CardGroup cols={2}>
+  <Card title="Initial Load" icon="rocket">
+    < 100ms from IndexedDB (instant)
+  </Card>
+  <Card title="Hydration" icon="database">
+    200-500ms from Supabase (fast)
+  </Card>
+  <Card title="Full Sync" icon="cloud-arrow-down">
+    2-10s from Google Calendar (slow)
+  </Card>
+  <Card title="Incremental Sync" icon="arrows-rotate">
+    < 1s (only changed events)
+  </Card>
+</CardGroup>
+
+## Best Practices
+
+<Accordion title="For optimal real-time performance">
+  1. **Enable Webhooks**: Configure `WEBHOOK_BASE_URL` in production
+  2. **Use IndexedDB**: Always show local data first
+  3. **Background Sync**: Let automatic polling handle updates
+  4. **Smart Polling**: Check server more frequently than Google
+  5. **Error Handling**: Gracefully handle connection failures
+  6. **Progress Feedback**: Show real-time progress during syncs
+</Accordion>
+
+## Troubleshooting
+
+<AccordionGroup>
+  <Accordion title="SSE connection fails">
+    - Check CORS configuration on server
+    - Verify `withCredentials: true` for authentication
+    - Check firewall/proxy allows SSE connections
+    - Look for `X-Accel-Buffering: no` header (required for nginx)
+  </Accordion>
+
+  <Accordion title="Webhooks not working">
+    - Verify `WEBHOOK_BASE_URL` is set and publicly accessible
+    - Check webhook registration logs for errors
+    - Confirm calendar supports webhooks (not read-only/public)
+    - Verify channel expiration dates are in the future
+  </Accordion>
+
+  <Accordion title="Slow sync performance">
+    - Check `MAX_CONCURRENT_CALENDAR_FETCHES` (default: 5)
+    - Monitor Google Calendar API quota usage
+    - Reduce number of calendars synced simultaneously
+    - Check network latency to Google Calendar API
+  </Accordion>
+</AccordionGroup>

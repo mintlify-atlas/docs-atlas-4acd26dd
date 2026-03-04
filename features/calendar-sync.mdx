@@ -1,0 +1,257 @@
+---
+title: 'Google Calendar Sync'
+description: 'Two-way synchronization with Google Calendar using incremental sync tokens and webhooks'
+---
+
+## Overview
+
+Chronos Calendar provides seamless two-way synchronization with Google Calendar, ensuring your events are always up-to-date across all devices. The sync system uses Google's incremental sync tokens and push notifications for efficient, real-time updates.
+
+## How Sync Works
+
+<Tabs>
+  <Tab title="Initial Sync">
+    When you first connect a Google Calendar:
+
+    1. **Full Sync**: Chronos fetches all events from your Google Calendar
+    2. **Encryption**: Event data is encrypted with your user key
+    3. **Storage**: Events are stored in both Supabase (server) and IndexedDB (local)
+    4. **Sync Token**: A sync token is saved to enable incremental updates
+
+    <Note>
+      The initial sync may take longer for calendars with many events. Progress is displayed in real-time.
+    </Note>
+  </Tab>
+
+  <Tab title="Incremental Sync">
+    After the initial sync, subsequent syncs only fetch changes:
+
+    - **Modified Events**: Updates to existing events
+    - **New Events**: Recently created events
+    - **Deleted Events**: Events marked for deletion
+
+    The sync uses Google's `syncToken` parameter to fetch only changes since the last sync, making it extremely efficient.
+
+    ```python
+    # From sync.py:41-72
+    sync_state = await asyncio.to_thread(get_calendar_sync_state, supabase, calendar_id)
+    sync_token = sync_state["sync_token"] if sync_state else None
+    page_token = sync_state["next_page_token"] if sync_state else None
+
+    if sync_token:
+        logger.info("  [%s] incremental sync (has sync token)", cal_name)
+    elif page_token:
+        logger.info("  [%s] resuming full sync (has page token)", cal_name)
+    else:
+        logger.info("  [%s] full sync (no sync state)", cal_name)
+    ```
+  </Tab>
+
+  <Tab title="Webhook Updates">
+    Chronos registers webhooks with Google Calendar to receive instant notifications when events change:
+
+    - **Push Notifications**: Google sends updates when events are modified
+    - **Auto-Refresh**: Your calendar automatically refreshes without user action
+    - **Background Sync**: Updates happen even when the app isn't open
+
+    <Info>
+      Webhooks are automatically renewed before expiration to maintain continuous updates.
+    </Info>
+  </Tab>
+</Tabs>
+
+## Syncing Your Calendar
+
+### Manual Sync
+
+Click the **Sync** button in the calendar header to manually trigger a sync:
+
+<Accordion title="What happens during manual sync">
+  1. **Connection**: Opens an SSE (Server-Sent Events) stream to the backend
+  2. **Progress**: Displays real-time progress for each calendar
+  3. **Event Processing**: Events are fetched, encrypted, and stored
+  4. **Completion**: Shows total events synced and last sync time
+
+  The sync endpoint streams events as they're fetched:
+
+  ```python
+  # From calendar.py:148-223
+  @router.get("/sync")
+  async def sync_calendars(
+      current_user: CurrentUser,
+      supabase: SupabaseClientDep,
+      http: HttpClient,
+      calendar_ids: str = Query(...),
+  ):
+      # SSE stream with real-time progress updates
+      async def event_generator():
+          events_queue: asyncio.Queue = asyncio.Queue()
+          # ... processes events and yields SSE messages
+  ```
+</Accordion>
+
+### Automatic Sync
+
+Chronos automatically syncs your calendars:
+
+- **Every 10 minutes** while the app is open
+- **On startup** when you launch the app
+- **Via webhooks** when Google Calendar sends push notifications
+- **Smart polling** checks for server-side updates every minute
+
+```typescript
+// From useCalendarSync.ts:15-17
+const POLL_INTERVAL_MS = 10 * 60 * 1000; // 10 minutes
+const MAX_FOREGROUND_SYNC_ATTEMPTS = 5;
+const FOREGROUND_SYNC_RETRY_DELAY_MS = 1000;
+```
+
+## Sync Status Indicators
+
+The calendar header displays sync status:
+
+<CardGroup cols={2}>
+  <Card title="Syncing" icon="arrows-rotate">
+    Progress bar shows events being fetched and calendars completed
+  </Card>
+  <Card title="Up to Date" icon="check">
+    Displays last sync timestamp (e.g., "Synced 2 minutes ago")
+  </Card>
+  <Card title="Error" icon="exclamation-triangle">
+    Shows error message with retry option
+  </Card>
+  <Card title="Needs Reauth" icon="key">
+    Google account requires re-authentication
+  </Card>
+</CardGroup>
+
+## Handling Sync Errors
+
+### Token Expiration
+
+If a sync token expires (error 410), Chronos automatically:
+
+1. Clears the expired token
+2. Performs a fresh full sync
+3. Saves the new sync token
+
+```python
+# From sync.py:130-136
+if e.status_code == 410 and not is_retry:
+    logger.info("Sync token expired for calendar %s, clearing and retrying full sync", calendar_id)
+    await asyncio.to_thread(clear_calendar_sync_state, supabase, calendar_id)
+    sync_token = None
+    page_token = None
+    is_retry = True
+    continue
+```
+
+### Rate Limiting
+
+<Note>
+  Syncs are rate-limited to once every 5 seconds per user to prevent abuse and quota exhaustion.
+</Note>
+
+### Connection Issues
+
+If sync fails due to network issues:
+
+- **Retryable errors** (500, 429, quota): Automatically retried with exponential backoff
+- **Non-retryable errors** (401, 403): Displayed to user with action required
+- **Timeout**: Sync cancelled after 5 minutes (300 seconds)
+
+## Multi-Calendar Sync
+
+You can sync up to 20 calendars simultaneously:
+
+- **Concurrent Fetching**: Up to 5 calendars fetched in parallel
+- **Independent Progress**: Each calendar's progress tracked separately
+- **Partial Success**: If one calendar fails, others continue syncing
+
+```typescript
+// From useCalendarSync.ts:136-177
+const params = new URLSearchParams({ calendar_ids: ids.join(",") });
+const url = `${getApiUrl()}/calendar/sync?${params.toString()}`;
+
+const eventSource = new EventSource(url, { withCredentials: true });
+
+eventSource.addEventListener("events", async (e) => {
+  const payload = JSON.parse(e.data);
+  await processEvents(payload);
+  eventsLoaded += payload.events.length;
+});
+```
+
+## Data Privacy
+
+<Info>
+  All event data is encrypted at rest using user-specific encryption keys. Even if the database is compromised, your calendar data remains secure.
+</Info>
+
+Event encryption happens before storage:
+
+```python
+# From sync.py:30-38
+async def add_events(supabase: Client, events: list[dict], user_id: str, calendar_id: str) -> None:
+    if not events:
+        return
+    try:
+        encrypted = await asyncio.to_thread(encrypt_events, events, user_id)
+        await asyncio.to_thread(upsert_events, supabase, encrypted)
+    except Exception:
+        logger.exception("Failed to encrypt/upsert events for calendar %s", calendar_id)
+        raise
+```
+
+## Troubleshooting
+
+<AccordionGroup>
+  <Accordion title="Calendar won't sync">
+    1. Check that your Google account doesn't show "Needs Reauth"
+    2. Try clicking the sync button manually
+    3. Check your internet connection
+    4. Look for error messages in the calendar header
+  </Accordion>
+
+  <Accordion title="Events are outdated">
+    - Manual sync: Click the sync button
+    - Webhooks may not be working: Check server logs for webhook errors
+    - Browser may be offline: Check network connectivity
+  </Accordion>
+
+  <Accordion title="Sync keeps failing">
+    - **401 Unauthorized**: Re-authenticate your Google account
+    - **403 Forbidden**: Check Google Calendar API quota limits
+    - **429 Rate Limited**: Wait a few minutes before trying again
+    - **500 Server Error**: Google Calendar may be temporarily unavailable
+  </Accordion>
+</AccordionGroup>
+
+## Technical Details
+
+### Sync Flow Architecture
+
+1. **Client Request**: Frontend initiates sync via SSE endpoint
+2. **Token Management**: Backend refreshes OAuth tokens if needed
+3. **Parallel Fetching**: Up to 5 calendars fetched concurrently
+4. **Event Streaming**: Events streamed to client as they're fetched
+5. **Local Storage**: Events stored in IndexedDB for offline access
+6. **Webhook Registration**: Push notification channels registered/renewed
+
+### OAuth Token Refresh
+
+```python
+# From gcal.py:62-78
+async def get_valid_access_token(http: httpx.AsyncClient, supabase: Client, user_id: str, google_account_id: str) -> str:
+    tokens = get_decrypted_tokens(supabase, user_id, google_account_id)
+    expires_at = parse_expires_at(tokens["expires_at"])
+
+    if not token_needs_refresh(expires_at):
+        return tokens["access_token"]
+
+    lock = await get_refresh_lock(google_account_id)
+    async with lock:
+        # ... refresh token logic
+```
+
+Tokens are automatically refreshed when they're about to expire, ensuring uninterrupted sync operations.

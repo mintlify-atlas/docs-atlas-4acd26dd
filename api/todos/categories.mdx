@@ -1,0 +1,173 @@
+---
+title: 'Todo Categories'
+description: 'Manage todo list categories (also known as todo lists)'
+---
+
+## Overview
+
+Categories in Chronos Calendar are synonymous with **todo lists**. They provide a way to organize todo items into different groups with custom names and colors.
+
+<Note>
+  The terms "categories" and "lists" are used interchangeably in the API. All category endpoints are documented in the [Todo Lists](/api/todos/lists) reference.
+</Note>
+
+---
+
+## Category Management
+
+For complete documentation on category/list management, see:
+
+<CardGroup cols={2}>
+  <Card title="Todo Lists" icon="list" href="/api/todos/lists">
+    Full CRUD operations for managing categories
+  </Card>
+  <Card title="Reorder Categories" icon="arrows-up-down" href="/api/todos/lists#reorder-lists">
+    Reorder categories using drag-and-drop
+  </Card>
+</CardGroup>
+
+---
+
+## Quick Reference
+
+### Category Endpoints
+
+All category endpoints use the `/todos/todo-lists` base path:
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `GET` | `/todos/todo-lists` | List all categories |
+| `POST` | `/todos/todo-lists` | Create a new category |
+| `PUT` | `/todos/todo-lists/{list_id}` | Update a category |
+| `DELETE` | `/todos/todo-lists/{list_id}` | Delete a category |
+| `POST` | `/todos/todo-lists/reorder` | Reorder categories |
+
+### Category Schema
+
+<ResponseField name="id" type="string" required>
+  Unique identifier for the category (UUID)
+</ResponseField>
+
+<ResponseField name="userId" type="string" required>
+  User ID that owns this category
+</ResponseField>
+
+<ResponseField name="name" type="string" required>
+  Category name (encrypted, max 100 characters)
+</ResponseField>
+
+<ResponseField name="color" type="string" required>
+  Hex color code (e.g., `#3B82F6`)
+</ResponseField>
+
+<ResponseField name="isSystem" type="boolean" required>
+  Whether this is a system category (cannot be deleted)
+</ResponseField>
+
+<ResponseField name="order" type="integer" required>
+  Sort order for displaying categories
+</ResponseField>
+
+---
+
+## Category Reordering
+
+<Card title="POST /todos/todo-lists/reorder" icon="arrows-up-down">
+  Reorder all categories in a single operation
+</Card>
+
+### Request Body
+
+<ParamField body="categoryIds" type="array" required>
+  Array of category UUIDs in the desired display order
+</ParamField>
+
+### Example Request
+
+```bash
+curl -X POST https://api.chronoscalendar.com/todos/todo-lists/reorder \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "categoryIds": [
+      "987fcdeb-51a2-43f1-b123-456789abcdef",
+      "123e4567-e89b-12d3-a456-426614174000",
+      "456e7890-e12b-34d5-a678-901234567890"
+    ]
+  }'
+```
+
+### Example Response
+
+```json
+{
+  "message": "Reordered"
+}
+```
+
+<Info>
+  Categories are assigned sequential order values starting from 0. The first UUID in the array receives `order: 0`, the second receives `order: 1`, and so on.
+</Info>
+
+---
+
+## System Categories
+
+System categories are pre-created lists that cannot be deleted by users. They are identified by the `isSystem: true` flag.
+
+<Warning>
+  Attempting to delete a system category will return a `400 Bad Request` error with the message: "Cannot delete system list"
+</Warning>
+
+### Characteristics
+
+- **Cannot be deleted**: DELETE operations are blocked
+- **Can be updated**: Name and color can be modified
+- **Skip encryption optimization**: System category names may skip encryption for performance
+- **User-specific**: Each user has their own set of system categories
+
+---
+
+## Color Validation
+
+Category colors must be valid 6-digit hex codes.
+
+**Valid formats**:
+- `#FF5733`
+- `#3b82f6`
+- `#10B981`
+
+**Invalid formats**:
+- `FF5733` (missing #)
+- `#F57` (too short)
+- `#FF57339` (too long)
+- `rgb(255, 87, 51)` (not hex)
+
+<CodeGroup>
+```json Valid
+{
+  "name": "Work",
+  "color": "#3B82F6"
+}
+```
+
+```json Invalid
+{
+  "name": "Work",
+  "color": "blue"
+}
+```
+</CodeGroup>
+
+---
+
+## Related Endpoints
+
+<CardGroup cols={2}>
+  <Card title="Todo Items" icon="check" href="/api/todos/items">
+    Manage individual todos within categories
+  </Card>
+  <Card title="Reorder Todos" icon="grip-lines" href="/api/todos/reorder">
+    Reorder todos within a category
+  </Card>
+</CardGroup>

@@ -1,0 +1,177 @@
+---
+title: Authentication
+description: Learn how to sign in to Chronos Calendar using Google OAuth
+icon: key
+---
+
+Chronos Calendar uses Google OAuth for secure authentication, allowing you to sign in with your existing Google account and automatically sync your Google Calendar data.
+
+## Signing In
+
+<Steps>
+  <Step title="Navigate to the Login Page">
+    When you first open Chronos Calendar, you'll be greeted with the login screen displaying the Chronos logo and a "Sign in with Google" button.
+  </Step>
+
+  <Step title="Click 'Sign in with Google'">
+    Click the button featuring the Google logo. This will redirect you to Google's secure OAuth authentication page.
+    
+    <Note>
+      Chronos Calendar requests access to your Google Calendar data and events. This is necessary to sync your calendars and provide full functionality.
+    </Note>
+  </Step>
+
+  <Step title="Authorize Chronos Calendar">
+    On the Google OAuth screen:
+    - Select the Google account you want to use
+    - Review the requested permissions:
+      - Access to Google Calendar
+      - Access to Google Calendar Events
+    - Click "Allow" to grant Chronos Calendar access to your calendars
+    
+    <Warning>
+      Make sure to click "Allow" for both calendar permissions. Without these, Chronos Calendar won't be able to display or sync your events.
+    </Warning>
+  </Step>
+
+  <Step title="Complete Sign In">
+    You'll be automatically redirected back to Chronos Calendar and signed in to your account. Your calendars will begin syncing immediately.
+  </Step>
+</Steps>
+
+## What Happens During Authentication
+
+When you sign in with Google, Chronos Calendar:
+
+1. **Creates your account** - A Chronos Calendar account is created and linked to your Google identity
+2. **Stores your Google account** - Your Google account information (email, name) is securely stored
+3. **Saves access tokens** - Encrypted OAuth tokens are stored to enable calendar synchronization
+4. **Syncs your calendars** - All your Google Calendars are automatically imported
+
+<Tip>
+  Chronos Calendar stores access tokens in an encrypted format for security. Google OAuth access tokens expire after approximately 1 hour and are automatically refreshed as needed.
+</Tip>
+
+## Authentication Errors
+
+If you encounter an error during authentication:
+
+### Access Denied
+
+If you clicked "Deny" or closed the Google OAuth window:
+- You'll see an "Authentication Failed" message
+- Click "Try Again" to restart the authentication process
+
+### Missing Authorization Code
+
+If no authorization code is received:
+- This usually indicates a network issue or browser problem
+- Try refreshing the page and signing in again
+- Check your internet connection
+- Clear your browser cache and cookies if the problem persists
+
+### Session Expiration
+
+Your session is maintained using secure cookies:
+- Access tokens are refreshed automatically when they expire
+- You'll be prompted to sign in again if your refresh token expires
+- Desktop app sessions persist across app restarts
+
+## Managing Your Session
+
+### Staying Signed In
+
+Chronos Calendar uses refresh tokens to keep you signed in:
+- Your session remains active across browser sessions
+- Tokens are securely stored in HTTP-only cookies
+- CSRF protection is automatically applied to all authenticated requests
+
+### Signing Out
+
+To sign out of Chronos Calendar:
+
+<Steps>
+  <Step title="Open the User Menu">
+    Click your profile picture in the bottom-left corner of the todo sidebar.
+  </Step>
+
+  <Step title="Click Log Out">
+    In the menu that appears, click the "Log out" button.
+  </Step>
+
+  <Step title="Confirm Sign Out">
+    You'll be immediately signed out and redirected to the login page. All session cookies are cleared.
+  </Step>
+</Steps>
+
+<Note>
+  Signing out of Chronos Calendar does not revoke access to your Google account. Your calendars will still be synced when you sign back in. To fully revoke access, visit your [Google Account permissions](https://myaccount.google.com/permissions).
+</Note>
+
+## Security Best Practices
+
+<CardGroup cols={2}>
+  <Card title="Use Strong Google Account Security" icon="shield-halved">
+    Enable two-factor authentication on your Google account for additional security.
+  </Card>
+  
+  <Card title="Sign Out on Shared Devices" icon="arrow-right-from-bracket">
+    Always sign out when using Chronos Calendar on public or shared computers.
+  </Card>
+  
+  <Card title="Review Connected Apps" icon="list-check">
+    Periodically review your Google Account's connected apps to ensure only authorized applications have access.
+  </Card>
+  
+  <Card title="Keep Your Browser Updated" icon="arrow-up">
+    Use the latest version of your browser for the best security and compatibility.
+  </Card>
+</CardGroup>
+
+## Desktop App Authentication
+
+The Electrobun desktop app uses the same Google OAuth flow with a few differences:
+
+- Authentication opens in your default web browser
+- After authorizing, you'll see a "Redirecting to Chronos" page
+- Click "Open Chronos" if the app doesn't open automatically
+- Your session is stored locally and persists across app restarts
+
+<Tip>
+  Having trouble with desktop authentication? Make sure Chronos Calendar is set as the default handler for `chronos://` URLs in your operating system settings.
+</Tip>
+
+## Troubleshooting
+
+### "Authentication Failed" Error
+
+1. Check that you're granting all requested permissions
+2. Ensure your Google account is not restricted by organization policies
+3. Try using a different browser or clearing your browser cache
+4. Check the browser console for detailed error messages
+
+### Rate Limiting
+
+Chronos Calendar implements rate limiting to prevent abuse:
+- If you attempt to authenticate too many times in a short period, you may be temporarily blocked
+- Wait a few minutes before trying again
+- This protection applies per IP address
+
+### Account Already Connected
+
+If you're trying to connect a Google account that's already linked:
+- You'll be signed in to your existing Chronos Calendar account
+- All previous settings and data will be preserved
+- You cannot create multiple Chronos accounts with the same Google account
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Managing Calendars" icon="calendar" href="/guide/managing-calendars">
+    Learn how to control calendar visibility and sync settings
+  </Card>
+  
+  <Card title="Creating Events" icon="calendar-plus" href="/guide/creating-events">
+    Start creating and editing calendar events
+  </Card>
+</CardGroup>

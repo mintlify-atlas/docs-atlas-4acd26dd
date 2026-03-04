@@ -1,0 +1,87 @@
+---
+title: "Initiate Google Login"
+api: "GET /auth/google/login"
+description: "Initiates the Google OAuth 2.0 authentication flow by generating an authorization URL with calendar scopes."
+---
+
+## Request
+
+### Query Parameters
+
+<ParamField query="redirectTo" type="string" optional>
+  Custom redirect URL after authentication completes. Must be in the configured allow list. If not provided, defaults to `{FRONTEND_URL}/auth/web/callback`.
+</ParamField>
+
+## Response
+
+<ResponseField name="redirectUrl" type="string" required>
+  The Google OAuth authorization URL that the client should redirect to. This URL includes all necessary OAuth parameters including:
+  - Calendar API scopes (`calendar` and `calendar.events`)
+  - PKCE challenge for security
+  - `access_type=offline` to request refresh tokens
+  - `prompt=consent` to force consent screen
+</ResponseField>
+
+<RequestExample>
+
+```bash cURL
+curl -X GET "https://api.chronos.app/auth/google/login" \
+  -H "Accept: application/json"
+```
+
+```bash With Custom Redirect
+curl -X GET "https://api.chronos.app/auth/google/login?redirectTo=https%3A%2F%2Fapp.chronos.com%2Fauth%2Fweb%2Fcallback" \
+  -H "Accept: application/json"
+```
+
+</RequestExample>
+
+<ResponseExample>
+
+```json 200 Success
+{
+  "redirectUrl": "https://accounts.google.com/o/oauth2/v2/auth?client_id=...&redirect_uri=...&scope=https://www.googleapis.com/auth/calendar+https://www.googleapis.com/auth/calendar.events&access_type=offline&prompt=consent&code_challenge=..."
+}
+```
+
+```json 400 Invalid Redirect
+{
+  "detail": "Invalid redirect URL"
+}
+```
+
+</ResponseExample>
+
+## Error Codes
+
+<ResponseField name="400" type="error">
+  Bad Request - The `redirectTo` parameter is not in the configured allow list
+</ResponseField>
+
+<ResponseField name="429" type="error">
+  Rate Limit Exceeded - Too many authentication requests from this IP address
+</ResponseField>
+
+## Rate Limits
+
+This endpoint is rate-limited according to the `RATE_LIMIT_AUTH` configuration. The rate limiter uses the client's IP address as the key.
+
+## Implementation Details
+
+- Uses Supabase Auth's `sign_in_with_oauth` method with Google provider
+- Implements PKCE (Proof Key for Code Exchange) for enhanced security
+- Requests offline access to obtain refresh tokens
+- Forces consent screen to ensure users grant calendar permissions
+- Validates redirect URLs against configured allow list
+
+## Security Notes
+
+- CSRF protection is handled via PKCE, eliminating the need for state cookies
+- Redirect URLs are strictly validated to prevent open redirect vulnerabilities
+- All OAuth parameters are server-generated to prevent tampering
+
+<Info>
+**Next Step**: After the user authorizes on Google, they will be redirected to the callback URL with an authorization code. Use the [Callback endpoint](/api/auth/callback) to exchange this code for session tokens.
+</Info>
+
+Source: `backend/app/routers/auth.py:117-141`

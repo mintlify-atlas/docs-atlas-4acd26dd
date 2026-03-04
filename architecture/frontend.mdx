@@ -1,0 +1,524 @@
+---
+title: 'Frontend Architecture'
+description: 'React application structure, state management, and offline-first data layer'
+icon: 'browser'
+---
+
+## Overview
+
+The Chronos Calendar frontend is a modern React 18 application built with TypeScript, featuring an **offline-first architecture** with IndexedDB for local storage, Zustand for state management, and TanStack Query for server state synchronization.
+
+## Technology Stack
+
+<CardGroup cols={2}>
+  <Card title="Core Framework" icon="react">
+    React 18.3.1 with TypeScript and React Router 7.11 for navigation
+  </Card>
+  <Card title="State Management" icon="database">
+    Zustand 5.0 for client state, TanStack Query 5.90 for server state
+  </Card>
+  <Card title="Local Storage" icon="hard-drive">
+    Dexie.js 4.2.1 wrapping IndexedDB for offline-first event storage
+  </Card>
+  <Card title="UI Components" icon="palette">
+    Radix UI primitives with Tailwind CSS 4.1 for styling
+  </Card>
+</CardGroup>
+
+## Application Architecture
+
+```
+src/
+├── components/          # React components
+│   ├── calendar/       # Calendar grid, event cards
+│   ├── modals/         # Dialogs and popovers
+│   ├── sidebar/        # Navigation and filters
+│   └── ui/             # Reusable UI primitives
+├── stores/             # Zustand state stores
+│   ├── calendar.store.ts
+│   ├── accounts.store.ts
+│   ├── sync.store.ts
+│   └── todo.store.ts
+├── lib/
+│   ├── db.ts           # Dexie database schema
+│   ├── api.ts          # API client functions
+│   └── utils.ts        # Utility functions
+├── hooks/              # Custom React hooks
+├── types/              # TypeScript type definitions
+└── App.tsx             # Root component
+```
+
+## State Management Architecture
+
+### Zustand Stores
+
+Chronos uses **Zustand** for client-side state management, organized into four specialized stores:
+
+<Tabs>
+  <Tab title="Calendar Store">
+    Manages calendar view state and navigation.
+
+    ```typescript
+    interface CalendarState {
+      view: CalendarView              // 'month' | 'week' | 'day'
+      currentDate: Date               // Currently displayed date
+      selectedEventId: string | null  // Event modal state
+      sidebarOpen: boolean            // Sidebar visibility
+      sidebarWidth: number            // Resizable sidebar width
+      showSettings: boolean           // Settings modal state
+
+      setView: (view: CalendarView) => void
+      setCurrentDate: (date: Date) => void
+      selectEvent: (id: string | null) => void
+      toggleSidebar: () => void
+      navigateToToday: () => void
+      navigatePrevious: () => void    // Month/week/day backward
+      navigateNext: () => void        // Month/week/day forward
+    }
+    ```
+
+    **Location**: `src/stores/calendar.store.ts:34`
+
+    <Note>
+      The store handles date navigation logic based on the current view, using `date-fns` functions like `addMonths`, `subMonths`, etc.
+    </Note>
+  </Tab>
+
+  <Tab title="Accounts Store">
+    Manages Google account connections and authentication state.
+
+    ```typescript
+    interface AccountsState {
+      accounts: Record<string, GoogleAccount>
+
+      setAccounts: (accounts: GoogleAccount[]) => void
+      addAccount: (account: GoogleAccount) => void
+      removeAccount: (accountId: string) => void
+      markNeedsReauth: (accountId: string) => void
+      clearReauth: (accountId: string) => void
+      getAccount: (accountId: string) => GoogleAccount | undefined
+      getAllAccounts: () => GoogleAccount[]
+    }
+    ```
+
+    **Location**: `src/stores/accounts.store.ts:4`
+
+    The store uses a **normalized structure** (keyed by account ID) for fast lookups and updates.
+  </Tab>
+
+  <Tab title="Sync Store">
+    Tracks synchronization status for background sync operations.
+
+    ```typescript
+    type SyncStatus = 'idle' | 'syncing' | 'error'
+
+    interface SyncState {
+      status: SyncStatus
+      error: string | null
+      syncingCalendarIds: string[]    // Track per-calendar sync
+      shouldStop: boolean             // Cancel signal
+
+      startSync: (calendarIds?: string[]) => void
+      completeSync: () => void
+      stopSync: () => void
+      setError: (error: string) => void
+      clearError: () => void
+      isSyncing: (calendarId?: string) => boolean
+      resetStopFlag: () => void
+    }
+    ```
+
+    **Location**: `src/stores/sync.store.ts:3`
+
+    This store provides fine-grained sync status, allowing UI to show loading states per calendar.
+  </Tab>
+
+  <Tab title="Todo Store">
+    Manages todo list selection and editing state.
+
+    ```typescript
+    interface TodoState {
+      selectedListId: string          // Filter todos by list
+      selectedTodoId: string | null   // Currently editing todo
+
+      setSelectedList: (id: string) => void
+      selectTodo: (id: string | null) => void
+    }
+    ```
+
+    **Location**: `src/stores/todo.store.ts:3`
+  </Tab>
+</Tabs>
+
+### Why Zustand?
+
+<Info>
+  Zustand was chosen for its **simplicity**, **small bundle size** (~1KB), and **no boilerplate** compared to Redux. It provides a hooks-based API that integrates seamlessly with React.
+</Info>
+
+## Offline-First Data Layer
+
+### IndexedDB with Dexie.js
+
+Chronos uses **Dexie.js** to manage IndexedDB, providing a structured database for offline event storage.
+
+#### Database Schema
+
+```typescript
+class ChronosDatabase extends Dexie {
+  events!: EntityTable<DexieEvent, 'id'>
+  syncMeta!: EntityTable<DexieSyncMeta, 'id'>
+  todos!: EntityTable<DexieTodo, 'id'>
+  todoLists!: EntityTable<DexieTodoList, 'id'>
+
+  constructor() {
+    super('chronos')
+    this.version(4).stores({
+      events: '++id, [calendarId+googleEventId], calendarId, googleAccountId, recurringEventId, [calendarId+recurringEventId], recurrence',
+      syncMeta: '++id, key',
+      todos: 'id, listId, userId, order',
+      todoLists: 'id, userId, order',
+    })
+  }
+}
+```
+
+**Location**: `src/lib/db.ts:85`
+
+<Note>
+  The schema uses **composite indexes** like `[calendarId+googleEventId]` for efficient queries when fetching events for a specific calendar.
+</Note>
+
+#### Event Storage Structure
+
+```typescript
+interface DexieEvent {
+  id?: number                         // Auto-increment primary key
+  googleEventId: string               // Google Calendar event ID
+  calendarId: string                  // Parent calendar ID
+  googleAccountId?: string            // Account that owns this event
+  summary: string                     // Event title
+  encryptedSummary?: string           // Encrypted title (if enabled)
+  description?: string
+  encryptedDescription?: string
+  location?: string
+  encryptedLocation?: string
+  start: EventDateTime                // { date?: string, dateTime?: string, timeZone?: string }
+  end: EventDateTime
+  recurrence?: string[]               // RRULE strings
+  recurringEventId?: string           // Parent recurring event
+  status: 'confirmed' | 'tentative' | 'cancelled'
+  visibility: 'default' | 'public' | 'private' | 'confidential'
+  attendees?: Attendee[]
+  encryptedAttendees?: string
+  organizer?: { email: string; displayName?: string; self?: boolean }
+  reminders?: { useDefault: boolean; overrides?: Reminder[] }
+  conferenceData?: ConferenceData
+  created?: string
+  updated?: string                    // ISO timestamp for conflict resolution
+}
+```
+
+**Location**: `src/lib/db.ts:9`
+
+### Sync Metadata
+
+The `syncMeta` table stores synchronization state:
+
+```typescript
+interface DexieSyncMeta {
+  id?: number
+  key: string          // e.g., 'lastSyncAt', 'syncToken:cal123'
+  value: string        // Serialized value
+  updatedAt: string    // Last update timestamp
+}
+```
+
+Helper functions manage sync tokens:
+
+```typescript
+export async function getLastSyncAt(): Promise<Date | null>
+export async function setLastSyncAt(date: Date): Promise<void>
+```
+
+**Location**: `src/lib/db.ts:156`
+
+### Upsert Strategy
+
+The `upsertEvents` function prevents overwriting newer data:
+
+```typescript
+export async function upsertEvents(events: DexieEvent[]): Promise<void> {
+  const eventsToWrite = await Promise.all(
+    events.map(async (event) => {
+      const existing = await db.events
+        .where('[calendarId+googleEventId]')
+        .equals([event.calendarId, event.googleEventId])
+        .first()
+      
+      if (!existing) return event
+      
+      // Only update if incoming event is newer
+      if (existing.updated && existing.updated >= (event.updated ?? ''))
+        return null
+      
+      return { ...event, id: existing.id }  // Preserve IndexedDB ID
+    })
+  )
+
+  if (eventsToWrite.length > 0) {
+    await db.events.bulkPut(eventsToWrite)
+  }
+}
+```
+
+**Location**: `src/lib/db.ts:120`
+
+<Info>
+  This **last-write-wins** strategy based on the `updated` timestamp ensures data consistency during sync.
+</Info>
+
+## Server State Management
+
+### TanStack Query
+
+While Zustand handles client state, **TanStack Query** manages server state:
+
+- Automatic background refetching
+- Caching and deduplication
+- Optimistic updates
+- Retry logic
+- Loading and error states
+
+#### Query Configuration
+
+```typescript
+import { QueryClient } from '@tanstack/react-query'
+import { PersistQueryClientProvider } from '@tanstack/react-query-persist-client'
+import { createSyncStoragePersister } from '@tanstack/react-query-persist-client'
+import { get, set, del } from 'idb-keyval'
+
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      staleTime: 1000 * 60 * 5,        // 5 minutes
+      gcTime: 1000 * 60 * 60 * 24,     // 24 hours
+      retry: 1,
+    },
+  },
+})
+
+const persister = createSyncStoragePersister({
+  storage: { getItem: get, setItem: set, removeItem: del },
+})
+```
+
+Queries are persisted to IndexedDB using `idb-keyval` for instant cache restoration on app load.
+
+### Optimistic Updates Pattern
+
+```typescript
+const createEventMutation = useMutation({
+  mutationFn: (event: CreateEventInput) => api.createEvent(event),
+  onMutate: async (newEvent) => {
+    // Cancel outgoing refetches
+    await queryClient.cancelQueries({ queryKey: ['events'] })
+    
+    // Snapshot previous value
+    const previousEvents = queryClient.getQueryData(['events'])
+    
+    // Optimistically update IndexedDB
+    await db.events.add(calendarEventToDexie(newEvent))
+    
+    return { previousEvents }
+  },
+  onError: (err, newEvent, context) => {
+    // Rollback on error
+    queryClient.setQueryData(['events'], context.previousEvents)
+  },
+  onSettled: () => {
+    // Refetch to ensure consistency
+    queryClient.invalidateQueries({ queryKey: ['events'] })
+  },
+})
+```
+
+## Component Architecture
+
+### UI Component Library
+
+Chronos uses **Radix UI** for accessible, unstyled primitives:
+
+- `@radix-ui/react-dialog` - Modals and dialogs
+- `@radix-ui/react-dropdown-menu` - Context menus
+- `@radix-ui/react-popover` - Popovers and tooltips
+- `@radix-ui/react-select` - Custom selects
+- `@radix-ui/react-toggle` - Toggle buttons
+
+These are styled with **Tailwind CSS 4.1** for a consistent design system.
+
+### Virtual Scrolling
+
+For large event lists, Chronos uses **TanStack Virtual**:
+
+```typescript
+import { useVirtualizer } from '@tanstack/react-virtual'
+
+const rowVirtualizer = useVirtualizer({
+  count: events.length,
+  getScrollElement: () => parentRef.current,
+  estimateSize: () => 64,  // Estimated row height
+  overscan: 5,             // Render 5 extra rows
+})
+```
+
+This enables smooth scrolling with thousands of events.
+
+### Drag and Drop
+
+Event reordering uses **@dnd-kit**:
+
+```typescript
+import { DndContext, closestCenter } from '@dnd-kit/core'
+import { SortableContext, verticalListSortingStrategy } from '@dnd-kit/sortable'
+```
+
+This provides accessible drag-and-drop for todos and calendar events.
+
+## Date and Recurrence Handling
+
+### Libraries
+
+- **date-fns 4.1.0**: Date manipulation and formatting
+- **rrule 2.8.1**: Recurrence rule parsing and generation
+
+### Recurrence Parsing
+
+```typescript
+import { RRule } from 'rrule'
+
+function parseRecurrence(recurrence: string[]): RRule {
+  const rruleString = recurrence.find(r => r.startsWith('RRULE:'))
+  if (!rruleString) return null
+  return RRule.fromString(rruleString.replace('RRULE:', ''))
+}
+```
+
+This allows rendering recurring event instances in the calendar grid.
+
+## Styling System
+
+### Tailwind CSS 4.1
+
+Chronos uses the latest **Tailwind CSS 4.1** with the new `@tailwindcss/postcss` plugin:
+
+```json
+{
+  "dependencies": {
+    "@tailwindcss/postcss": "^4.1.18",
+    "tailwindcss": "^4.1.18"
+  }
+}
+```
+
+This provides:
+
+- Faster build times
+- Smaller CSS output
+- Better IntelliSense support
+
+### Design Tokens
+
+Custom CSS variables for theming:
+
+```css
+:root {
+  --color-primary: 59 130 246;        /* blue-500 */
+  --color-background: 255 255 255;    /* white */
+  --color-surface: 249 250 251;       /* gray-50 */
+  --color-text: 17 24 39;             /* gray-900 */
+  --sidebar-width: 320px;
+}
+```
+
+## Build Configuration
+
+### Vite Setup
+
+```typescript
+import { defineConfig } from 'vite'
+import react from '@vitejs/plugin-react'
+
+export default defineConfig({
+  plugins: [react()],
+  build: {
+    target: 'esnext',
+    minify: 'esbuild',
+    sourcemap: true,
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          vendor: ['react', 'react-dom', 'react-router-dom'],
+          state: ['zustand', '@tanstack/react-query'],
+          db: ['dexie', 'dexie-react-hooks'],
+          ui: ['@radix-ui/react-dialog', '@radix-ui/react-dropdown-menu'],
+        },
+      },
+    },
+  },
+})
+```
+
+Code splitting ensures fast initial load times.
+
+## Performance Optimizations
+
+<CardGroup cols={2}>
+  <Card title="Virtual Scrolling" icon="gauge-high">
+    TanStack Virtual renders only visible events, handling 10,000+ items smoothly
+  </Card>
+  <Card title="Memoization" icon="memo">
+    React.memo and useMemo prevent unnecessary re-renders of calendar grid
+  </Card>
+  <Card title="Code Splitting" icon="scissors">
+    Dynamic imports and route-based splitting reduce initial bundle size
+  </Card>
+  <Card title="IndexedDB Indexes" icon="database">
+    Composite indexes enable fast queries without full table scans
+  </Card>
+</CardGroup>
+
+### Bundle Size
+
+```bash
+# Production build analysis
+npm run build
+
+# Typical bundle sizes:
+# vendor.js      ~150 KB (React, React DOM, Router)
+# state.js       ~15 KB  (Zustand, TanStack Query)
+# db.js          ~30 KB  (Dexie.js)
+# ui.js          ~45 KB  (Radix UI components)
+# main.js        ~80 KB  (Application code)
+```
+
+## Testing Strategy
+
+<Note>
+  While not extensively covered in the codebase, the architecture supports testing with:
+  - **Vitest** for unit tests
+  - **React Testing Library** for component tests
+  - **Mock Service Worker (MSW)** for API mocking
+  - **Fake IndexedDB** for database testing
+</Note>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Backend Architecture" icon="server" href="/architecture/backend">
+    Explore the FastAPI backend and Google Calendar integration
+  </Card>
+  <Card title="Security Features" icon="shield" href="/architecture/security">
+    Learn about encryption and security measures
+  </Card>
+</CardGroup>

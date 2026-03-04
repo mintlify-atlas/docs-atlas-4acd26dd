@@ -1,0 +1,183 @@
+---
+title: Introduction
+description: Welcome to Chronos Calendar - A powerful full-stack calendar application with Google Calendar sync and todo management
+---
+
+## Overview
+
+Chronos Calendar is a modern, full-stack SaaS calendar application built with React, TypeScript, and FastAPI. It seamlessly integrates with Google Calendar, provides robust todo management, and delivers real-time updates across web and desktop platforms.
+
+<CardGroup cols={2}>
+  <Card
+    title="Quickstart"
+    icon="rocket"
+    href="/quickstart"
+  >
+    Get up and running in minutes with your first calendar sync
+  </Card>
+  <Card
+    title="Installation"
+    icon="download"
+    href="/installation"
+  >
+    Detailed setup instructions for both web and desktop versions
+  </Card>
+  <Card
+    title="API Reference"
+    icon="code"
+    href="/api/auth/login"
+  >
+    Complete API documentation for all endpoints
+  </Card>
+  <Card
+    title="Architecture"
+    icon="building"
+    href="/architecture/overview"
+  >
+    Learn about the system design and technology stack
+  </Card>
+</CardGroup>
+
+## Core Features
+
+<CardGroup cols={2}>
+  <Card title="Google Calendar Sync" icon="calendar">
+    Two-way synchronization with Google Calendar using OAuth 2.0. Access and manage your Google events with real-time webhook notifications.
+  </Card>
+  
+  <Card title="Todo Management" icon="list-check">
+    Organize tasks with custom lists, categories, and scheduled dates. Encrypted at rest for maximum security.
+  </Card>
+  
+  <Card title="Cross-Platform" icon="desktop">
+    Available as both a web application (Vite + React) and desktop app (Electrobun) with native system integrations.
+  </Card>
+  
+  <Card title="Real-time Updates" icon="bolt">
+    Server-Sent Events (SSE) provide live calendar updates. React Query with persistence ensures offline-first functionality.
+  </Card>
+  
+  <Card title="Secure by Default" icon="shield-halved">
+    Field-level encryption, CSRF protection, secure HTTP-only cookies, and comprehensive security headers.
+  </Card>
+  
+  <Card title="Production-Ready" icon="server">
+    Rate limiting with SlowAPI, GZip compression, CORS configuration, and robust error handling.
+  </Card>
+</CardGroup>
+
+## Technology Stack
+
+### Frontend
+
+- **React 18** with TypeScript for type-safe development
+- **Vite** for blazing-fast development and optimized builds
+- **TanStack Query** for powerful async state management with persistence
+- **React Router v7** for client-side routing
+- **Tailwind CSS v4** for modern, responsive styling
+- **Radix UI** for accessible component primitives
+- **Electrobun** for cross-platform desktop builds
+- **Dexie** for local IndexedDB storage
+- **date-fns** for date manipulation and formatting
+- **Zod** for runtime schema validation
+
+### Backend
+
+- **FastAPI** for high-performance async Python API
+- **Supabase** for authentication and PostgreSQL database
+- **Pydantic** for data validation and settings management
+- **Uvicorn** with standard extras for ASGI server
+- **SlowAPI** for rate limiting
+- **httpx** for async HTTP requests to Google APIs
+- **cryptography** for field-level encryption
+- **FastEmbed** for AI-powered features
+
+### Infrastructure
+
+- **PostgreSQL** (via Supabase) with Row Level Security
+- **Google OAuth 2.0** with offline access and refresh tokens
+- **Webhook notifications** from Google Calendar API
+- **Server-Sent Events** for real-time updates
+
+## Key Capabilities
+
+<AccordionGroup>
+  <Accordion title="Authentication & Security">
+    - Google OAuth 2.0 with PKCE flow
+    - Secure session management with HTTP-only cookies
+    - CSRF protection with token validation
+    - Field-level encryption for sensitive data
+    - Rate limiting on all endpoints
+    - Security headers middleware (CSP, HSTS, X-Frame-Options)
+    - Origin validation and Fetch Metadata checks
+  </Accordion>
+
+  <Accordion title="Calendar Management">
+    - List all Google Calendars for connected accounts
+    - Sync events from multiple calendars simultaneously
+    - Real-time sync via Google Calendar webhook notifications
+    - Event filtering by date range and calendar
+    - Support for recurring events with RRULE parsing
+    - SSE streaming for live calendar updates
+    - Intelligent caching and rate limiting
+  </Accordion>
+
+  <Accordion title="Todo System">
+    - Create custom todo lists and categories
+    - Encrypt todo content at the field level
+    - Schedule todos for specific dates
+    - Drag-and-drop reordering with optimistic updates
+    - System-level lists (like "Inbox") with special handling
+    - Automatic timestamps for created/updated tracking
+  </Accordion>
+
+  <Accordion title="Desktop Integration">
+    - Native desktop app using Electrobun
+    - System keychain integration for secure token storage
+    - Custom URL scheme (chronoscalendar://) for OAuth callbacks
+    - Platform detection and conditional rendering
+    - Cross-platform builds for macOS, Linux, and Windows
+  </Accordion>
+</AccordionGroup>
+
+## Architecture Highlights
+
+Chronos Calendar follows modern best practices:
+
+- **API-First Design**: Clean separation between frontend and backend with `/api` proxy routing
+- **Type Safety**: End-to-end TypeScript on frontend, Pydantic models on backend
+- **Offline-First**: TanStack Query with IDB persistence for resilient offline capabilities
+- **Secure Cookies**: Session and refresh tokens stored in secure, HTTP-only cookies
+- **Environment-Based Config**: Pydantic Settings with validation for all configuration
+- **Middleware Stack**: Layered security with GZip, CORS, CSRF, and custom security headers
+- **Error Boundaries**: Comprehensive error handling at API and component levels
+
+## Getting Started
+
+<Steps>
+  <Step title="Choose Your Path">
+    Start with the [Quickstart](/quickstart) for a rapid setup, or follow the detailed [Installation](/installation) guide for a complete development environment.
+  </Step>
+  
+  <Step title="Configure Environment">
+    Set up your `.env` file with Supabase credentials, Google OAuth client ID/secret, and encryption keys.
+  </Step>
+  
+  <Step title="Run the Application">
+    Launch the backend with `uvicorn` and frontend with `npm run dev`, then authenticate with Google to start syncing calendars.
+  </Step>
+</Steps>
+
+<Note>
+  Chronos Calendar requires a Supabase project and Google Cloud OAuth 2.0 credentials. See the [Installation](/installation) guide for detailed setup instructions.
+</Note>
+
+## What's Next?
+
+Explore the documentation to learn more:
+
+- **[Quickstart](/quickstart)**: Get your first sync working in under 10 minutes
+- **[Installation](/installation)**: Complete setup for development and production
+- **[API Reference](/api/auth/login)**: Detailed endpoint documentation
+- **[Architecture](/architecture/overview)**: System architecture and design
+- **[User Guide](/guide/authentication)**: Learn how to use Chronos Calendar

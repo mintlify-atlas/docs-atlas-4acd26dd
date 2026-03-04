@@ -1,0 +1,222 @@
+---
+title: "Sync Events"
+api: "GET /calendar/sync"
+description: "Sync calendar events from Google Calendar using Server-Sent Events (SSE)"
+---
+
+## Endpoint
+
+```
+GET /calendar/sync
+```
+
+Synchronizes calendar events from Google Calendar using incremental sync when possible. This endpoint uses Server-Sent Events (SSE) to stream real-time sync progress back to the client.
+
+## Authentication
+
+Requires a valid authentication token in the request headers.
+
+## Query Parameters
+
+<ParamField query="calendar_ids" type="string" required>
+  Comma-separated list of calendar IDs to sync. Maximum 20 calendars per sync.
+  
+  Example: `cal_abc123,cal_def456,cal_ghi789`
+</ParamField>
+
+## Response Format
+
+This endpoint returns a stream of Server-Sent Events (SSE). The `Content-Type` is `text/event-stream`.
+
+### Response Headers
+
+```
+Content-Type: text/event-stream
+Cache-Control: no-cache
+Connection: keep-alive
+X-Accel-Buffering: no
+```
+
+### Event Types
+
+<ResponseField name="events" type="SSE event">
+  Batch of synced events from a calendar
+  
+  <Expandable title="Event data">
+    <ResponseField name="calendar_id" type="string" required>
+      ID of the calendar these events belong to
+    </ResponseField>
+    
+    <ResponseField name="events" type="array" required>
+      Array of event objects (decrypted and formatted for frontend)
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+<ResponseField name="sync_token" type="SSE event">
+  Sync token saved for incremental sync
+  
+  <Expandable title="Event data">
+    <ResponseField name="calendar_id" type="string" required>
+      ID of the calendar that received a sync token
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+<ResponseField name="sync_error" type="SSE event">
+  Error occurred during sync
+  
+  <Expandable title="Event data">
+    <ResponseField name="calendar_id" type="string">
+      ID of the calendar where the error occurred (if applicable)
+    </ResponseField>
+    
+    <ResponseField name="code" type="string" required>
+      HTTP status code or error code
+    </ResponseField>
+    
+    <ResponseField name="message" type="string" required>
+      Human-readable error message
+    </ResponseField>
+    
+    <ResponseField name="retryable" type="boolean">
+      Whether the error is retryable
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+<ResponseField name="complete" type="SSE event">
+  Sync completed successfully
+  
+  <Expandable title="Event data">
+    <ResponseField name="total_events" type="number" required>
+      Total number of events synced across all calendars
+    </ResponseField>
+    
+    <ResponseField name="calendars_synced" type="number" required>
+      Number of calendars successfully synced
+    </ResponseField>
+    
+    <ResponseField name="last_sync_at" type="string">
+      ISO 8601 timestamp of the most recent sync
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+## Sync Behavior
+
+- **Incremental Sync**: When a sync token exists, only changed events are fetched
+- **Full Sync**: When no sync token exists or it has expired (410 error), all events are fetched
+- **Resumable Sync**: If interrupted, sync can resume from the last page token
+- **Concurrent Fetching**: Up to 5 calendars are synced concurrently
+- **Timeout**: Sync operation times out after 300 seconds
+- **Rate Limiting**: 5-second cooldown between sync requests per user
+
+## Example Request
+
+```bash cURL
+curl -X GET "https://api.chronoscalendar.com/calendar/sync?calendar_ids=cal_abc123,cal_def456" \
+  -H "Authorization: Bearer YOUR_ACCESS_TOKEN" \
+  -H "Accept: text/event-stream"
+```
+
+```javascript JavaScript (EventSource)
+const eventSource = new EventSource(
+  'https://api.chronoscalendar.com/calendar/sync?calendar_ids=cal_abc123,cal_def456',
+  {
+    headers: {
+      'Authorization': 'Bearer YOUR_ACCESS_TOKEN'
+    }
+  }
+);
+
+eventSource.addEventListener('events', (e) => {
+  const data = JSON.parse(e.data);
+  console.log('Received events:', data.events.length);
+});
+
+eventSource.addEventListener('sync_error', (e) => {
+  const data = JSON.parse(e.data);
+  console.error('Sync error:', data.message);
+});
+
+eventSource.addEventListener('complete', (e) => {
+  const data = JSON.parse(e.data);
+  console.log('Sync complete:', data.total_events, 'events');
+  eventSource.close();
+});
+```
+
+## Example Response Stream
+
+```
+event: events
+data: {"calendar_id":"cal_abc123","events":[{"id":"evt_1","summary":"Team Meeting"}]}
+
+event: events
+data: {"calendar_id":"cal_abc123","events":[{"id":"evt_2","summary":"Lunch Break"}]}
+
+event: sync_token
+data: {"calendar_id":"cal_abc123"}
+
+event: events
+data: {"calendar_id":"cal_def456","events":[{"id":"evt_3","summary":"Project Review"}]}
+
+event: sync_token
+data: {"calendar_id":"cal_def456"}
+
+event: complete
+data: {"total_events":3,"calendars_synced":2,"last_sync_at":"2026-03-04T10:30:00Z"}
+```
+
+## Error Responses
+
+<ResponseField name="400 Bad Request">
+  `calendar_ids` parameter is missing or invalid
+</ResponseField>
+
+<ResponseField name="401 Unauthorized">
+  Authentication token is missing or invalid
+</ResponseField>
+
+<ResponseField name="429 Too Many Requests">
+  Sync rate limit exceeded (5-second cooldown)
+  
+  ```json
+  {"detail": "Sync rate limit exceeded. Please wait before syncing again."}
+  ```
+</ResponseField>
+
+<ResponseField name="408 Request Timeout (SSE)">
+  Sync operation timed out after 300 seconds
+  
+  ```
+  event: sync_error
+  data: {"code":"408","message":"Sync timed out"}
+  ```
+</ResponseField>
+
+## Google API Error Handling
+
+- **410 Gone**: Sync token expired - automatically retries with full sync
+- **401 Unauthorized**: Access token expired - automatically refreshes token
+- **403 Forbidden**: Quota exceeded or access denied - marked as retryable
+- **429 Rate Limited**: Google API rate limit - marked as retryable
+- **500+ Server Errors**: Google server issues - marked as retryable
+
+## Webhook Registration
+
+After successful sync, the endpoint automatically registers a webhook channel with Google Calendar for real-time updates (if `WEBHOOK_BASE_URL` is configured).
+
+## Related Endpoints
+
+- [Get Events](/api/calendar/get-events) - Retrieve stored events without syncing
+- [Webhook](/api/calendar/webhook) - Receive real-time notifications from Google
+- [List Calendars](/api/calendar/list-calendars) - Get available calendars to sync
+
+## Source Code Reference
+
+See implementation in:
+- `backend/app/routers/calendar.py:148-223` (SSE endpoint)
+- `backend/app/calendar/sync.py:219-244` (sync logic)
+- `backend/app/calendar/gcal.py:184-231` (Google Calendar API)

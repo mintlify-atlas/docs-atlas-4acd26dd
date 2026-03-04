@@ -1,0 +1,467 @@
+---
+title: Desktop Application
+description: Learn how to install and use the Chronos Calendar Electrobun desktop app
+icon: desktop
+---
+
+Chronos Calendar is available as a native desktop application built with Electrobun, providing better performance, offline capabilities, and seamless integration with your operating system.
+
+## What is Electrobun?
+
+Electrobun is a modern framework for building desktop applications:
+
+- **Native Performance** - Fast, responsive, and efficient
+- **Cross-Platform** - Works on macOS, Windows, and Linux
+- **Small Footprint** - Lightweight compared to traditional Electron apps
+- **Modern Architecture** - Built with Bun runtime for speed
+
+<Info>
+  The Chronos Calendar desktop app provides the same features as the web version with added benefits like native notifications, offline support, and system integration.
+</Info>
+
+## Installing the Desktop App
+
+### System Requirements
+
+Before installing, ensure your system meets these requirements:
+
+<Tabs>
+  <Tab title="macOS">
+    - macOS 11.0 (Big Sur) or later
+    - 64-bit Intel or Apple Silicon processor
+    - 200 MB of available disk space
+    - Internet connection for initial download and sync
+  </Tab>
+  
+  <Tab title="Windows">
+    - Windows 10 or later (64-bit)
+    - x64 processor
+    - 200 MB of available disk space
+    - Internet connection for initial download and sync
+  </Tab>
+  
+  <Tab title="Linux">
+    - Modern Linux distribution (Ubuntu 20.04+, Fedora 35+, etc.)
+    - x64 processor
+    - 200 MB of available disk space
+    - Internet connection for initial download and sync
+  </Tab>
+</Tabs>
+
+### Download and Installation
+
+<Steps>
+  <Step title="Download the Installer">
+    Download the installer for your operating system from the releases page:
+    - **macOS** - `.dmg` disk image
+    - **Windows** - `.exe` installer
+    - **Linux** - `.AppImage` or `.deb` package
+  </Step>
+
+  <Step title="Run the Installer">
+    **macOS:**
+    1. Open the downloaded `.dmg` file
+    2. Drag Chronos Calendar to your Applications folder
+    3. Eject the disk image
+    
+    **Windows:**
+    1. Run the downloaded `.exe` file
+    2. Follow the installation wizard
+    3. Choose installation location (default recommended)
+    4. Click "Install"
+    
+    **Linux:**
+    1. Make the `.AppImage` executable: `chmod +x Chronos-Calendar.AppImage`
+    2. Run the AppImage, or install the `.deb` package with your package manager
+  </Step>
+
+  <Step title="Launch the App">
+    Open Chronos Calendar from:
+    - **macOS** - Applications folder or Launchpad
+    - **Windows** - Start menu or desktop shortcut
+    - **Linux** - Application menu or by running the AppImage
+  </Step>
+
+  <Step title="Sign In">
+    On first launch, you'll see the login screen. Sign in with your Google account using the same OAuth flow as the web version.
+  </Step>
+</Steps>
+
+<Tip>
+  On macOS, you may need to allow the app to run in System Preferences > Security & Privacy if you see a security warning on first launch.
+</Tip>
+
+## Desktop Authentication
+
+The desktop app uses a slightly different authentication flow:
+
+### How It Works
+
+<Steps>
+  <Step title="Click Sign In">
+    Click "Sign in with Google" in the desktop app.
+  </Step>
+
+  <Step title="Browser Opens">
+    Your default web browser opens to Google's OAuth authorization page.
+  </Step>
+
+  <Step title="Authorize Access">
+    Grant Chronos Calendar permission to access your Google Calendar.
+  </Step>
+
+  <Step title="Return to App">
+    After authorization, you'll see a "Redirecting to Chronos" page with options:
+    - **Open Chronos** button - Click to return to the app
+    - **Try again** button - Restart authentication if something went wrong
+  </Step>
+
+  <Step title="Automatic Redirect">
+    If `chronos://` URL handling is configured, the app opens automatically. Otherwise, click "Open Chronos" manually.
+  </Step>
+</Steps>
+
+<Note>
+  The desktop app callback page has a dark theme matching the native aesthetic. If the automatic redirect doesn't work, simply click the "Open Chronos" button.
+</Note>
+
+### URL Protocol Handler
+
+The desktop app registers the `chronos://` URL protocol:
+
+- Allows the browser to automatically open the app after authentication
+- Enables deep linking to specific views or events
+- May require one-time system permission on first use
+
+**Troubleshooting URL handling:**
+
+<AccordionGroup>
+  <Accordion title="macOS">
+    If automatic redirects don't work:
+    1. Open System Preferences > Security & Privacy
+    2. Allow Chronos Calendar to be the handler for `chronos://` URLs
+    3. Restart the app and try signing in again
+  </Accordion>
+
+  <Accordion title="Windows">
+    If automatic redirects don't work:
+    1. Open Settings > Apps > Default apps
+    2. Scroll to "Choose default apps by protocol"
+    3. Find `chronos://` and select Chronos Calendar
+    4. Restart the app and try signing in again
+  </Accordion>
+
+  <Accordion title="Linux">
+    If automatic redirects don't work:
+    1. Check your desktop environment's URL handler settings
+    2. Manually associate `chronos://` with the Chronos Calendar executable
+    3. Restart the app and try signing in again
+  </Accordion>
+</AccordionGroup>
+
+## Desktop App Features
+
+### Persistent Sessions
+
+Unlike the web version, desktop app sessions persist:
+
+- **Stay signed in** - Remains authenticated across app restarts
+- **Secure storage** - Credentials stored securely using native OS keychains
+- **Auto-refresh** - Tokens are automatically refreshed in the background
+
+### Native Notifications
+
+Receive desktop notifications for:
+
+- Upcoming events (coming soon)
+- Task reminders (coming soon)
+- Calendar sync updates (coming soon)
+- System-level alerts following OS notification standards
+
+<Note>
+  Notification features are planned for future releases. The infrastructure is in place in the desktop app.
+</Note>
+
+### Offline Support
+
+The desktop app provides limited offline functionality:
+
+- **View cached data** - See recently loaded calendars and events
+- **Create drafts** - Add events and todos that sync when back online
+- **Automatic sync** - Changes sync automatically when connection is restored
+
+<Warning>
+  While offline, you can view cached data, but creating or editing events requires an internet connection to sync with Google Calendar.
+</Warning>
+
+### System Integration
+
+<Tabs>
+  <Tab title="macOS">
+    - **Menu bar integration** - Access app from the menu bar
+    - **Dock badge** - Show unread counts or notifications
+    - **Touch Bar support** - Quick actions on MacBook Pro Touch Bar (coming soon)
+    - **Spotlight integration** - Search events from Spotlight (coming soon)
+  </Tab>
+  
+  <Tab title="Windows">
+    - **System tray** - Minimize to system tray
+    - **Taskbar integration** - Pin to taskbar for quick access
+    - **Jump lists** - Quick actions from taskbar right-click (coming soon)
+    - **Notifications** - Windows notification center integration
+  </Tab>
+  
+  <Tab title="Linux">
+    - **System tray** - Minimize to system tray
+    - **Desktop environment integration** - Works with GNOME, KDE, etc.
+    - **Notification daemon** - Native notifications via libnotify
+    - **Application menu** - Standard Linux app menu integration
+  </Tab>
+</Tabs>
+
+## Development Mode
+
+The desktop app includes development capabilities:
+
+### Running in Development
+
+```bash
+npm run dev
+```
+
+This command:
+1. Builds the Electrobun application
+2. Launches the app in development mode
+3. Enables hot reload for code changes
+4. Opens developer tools automatically
+
+<Note>
+  Development mode is only for developers building or customizing Chronos Calendar. Regular users should download the production builds from the official website.
+</Note>
+
+### Building from Source
+
+```bash
+# Development build
+npm run build
+
+# Production build
+npm run build:prod
+```
+
+Builds are created in the Electrobun output directory with platform-specific installers.
+
+## Updating the Desktop App
+
+Keep your desktop app up to date:
+
+### Automatic Updates (Coming Soon)
+
+- App checks for updates on launch
+- Notifies you when updates are available
+- One-click update and restart
+- Incremental updates for faster downloads
+
+### Manual Updates
+
+Until automatic updates are implemented:
+
+<Steps>
+  <Step title="Check for Updates">
+    Check the releases page to see if a newer version is available.
+  </Step>
+
+  <Step title="Download New Version">
+    Download the latest installer for your operating system.
+  </Step>
+
+  <Step title="Install Update">
+    Run the installer. On most platforms, it will automatically replace the old version.
+    
+    <Tip>
+      You don't need to uninstall the old version first. The installer handles the upgrade.
+    </Tip>
+  </Step>
+
+  <Step title="Restart the App">
+    Launch the updated app. Your session and data are preserved across updates.
+  </Step>
+</Steps>
+
+## Performance and Optimization
+
+The desktop app is optimized for performance:
+
+### Memory Usage
+
+- **Efficient rendering** - Only visible elements are rendered
+- **Lazy loading** - Data loads on demand
+- **Resource cleanup** - Automatic memory management
+- **Optimized for long-running sessions**
+
+### Startup Time
+
+- **Fast cold start** - Launches quickly even on first run
+- **Instant warm start** - Near-instantaneous restarts
+- **Background loading** - Data syncs after UI appears
+
+### Battery Life
+
+On laptops, the desktop app is battery-friendly:
+
+- Minimal background activity when idle
+- Efficient sync scheduling
+- CPU throttling when not in focus
+- Dark mode support for OLED displays (coming soon)
+
+## Comparing Web vs Desktop
+
+| Feature | Web App | Desktop App |
+|---------|---------|-------------|
+| Installation | None required | One-time install |
+| Performance | Good | Excellent |
+| Offline support | Limited | Yes (with caching) |
+| System integration | Basic | Full native integration |
+| Auto-updates | Always latest | Coming soon |
+| Platform availability | Any browser | macOS, Windows, Linux |
+| Session persistence | Cookie-based | Secure native storage |
+| Notifications | Browser-only | Native system notifications |
+
+<Info>
+  Both versions provide the same core functionality. Choose the desktop app for better performance and native integration, or use the web app for instant access without installation.
+</Info>
+
+## Troubleshooting Desktop Issues
+
+### App Won't Launch
+
+<AccordionGroup>
+  <Accordion title="macOS Security Warning">
+    If you see "Chronos Calendar can't be opened because it is from an unidentified developer":
+    1. Open System Preferences > Security & Privacy
+    2. Click "Open Anyway" next to the Chronos Calendar message
+    3. Confirm you want to open the app
+  </Accordion>
+
+  <Accordion title="Windows SmartScreen Warning">
+    If Windows Defender SmartScreen blocks the app:
+    1. Click "More info" in the SmartScreen dialog
+    2. Click "Run anyway"
+    3. The app will launch and this warning won't appear again
+  </Accordion>
+
+  <Accordion title="Linux Permission Issues">
+    If the AppImage won't execute:
+    ```bash
+    chmod +x Chronos-Calendar.AppImage
+    ./Chronos-Calendar.AppImage
+    ```
+  </Accordion>
+</AccordionGroup>
+
+### Authentication Problems
+
+1. **Browser doesn't open** - Check default browser settings
+2. **Redirect doesn't work** - Click "Open Chronos" button manually
+3. **Already signed in on web** - Sessions are separate; sign in again on desktop
+4. **URL handler not working** - See URL Protocol Handler section above
+
+### Sync Issues
+
+1. Check internet connection
+2. Verify you're signed in (look for user profile in bottom-left)
+3. Check if Google account needs reauthorization
+4. Try signing out and back in
+5. Restart the app
+
+### Performance Issues
+
+1. **App is slow** - Restart the app to clear memory
+2. **High CPU usage** - Check for large calendar loads; try hiding unused calendars
+3. **Crashes** - Check for updates; file a bug report if persistent
+4. **UI not updating** - Refresh the view or restart the app
+
+## Data and Privacy
+
+### Local Data Storage
+
+The desktop app stores data locally:
+
+- **Session tokens** - Encrypted in OS-native keychain/credential manager
+- **Calendar cache** - Stored in app data directory
+- **User preferences** - Stored in app configuration files
+- **Todos** - Synced with cloud but cached locally
+
+### Data Location
+
+<Tabs>
+  <Tab title="macOS">
+    ```
+    ~/Library/Application Support/chronos-calendar/
+    ```
+  </Tab>
+  
+  <Tab title="Windows">
+    ```
+    %APPDATA%\chronos-calendar\
+    ```
+  </Tab>
+  
+  <Tab title="Linux">
+    ```
+    ~/.config/chronos-calendar/
+    ```
+  </Tab>
+</Tabs>
+
+### Uninstalling
+
+To completely remove Chronos Calendar:
+
+<Steps>
+  <Step title="Uninstall the App">
+    **macOS** - Drag app from Applications to Trash
+    **Windows** - Use "Add or Remove Programs" in Settings
+    **Linux** - Delete the AppImage or uninstall the package
+  </Step>
+
+  <Step title="Remove Data (Optional)">
+    Delete the data directory shown above to remove all cached data and preferences.
+  </Step>
+
+  <Step title="Revoke Access (Optional)">
+    Visit [Google Account permissions](https://myaccount.google.com/permissions) to revoke Chronos Calendar's access to your Google account.
+  </Step>
+</Steps>
+
+## Best Practices
+
+<CardGroup cols={2}>
+  <Card title="Keep App Updated" icon="arrow-up">
+    Check for updates regularly to get the latest features, performance improvements, and security patches.
+  </Card>
+  
+  <Card title="Use Desktop for Daily Work" icon="briefcase">
+    Install the desktop app if you use Chronos Calendar frequently. Better performance and offline support improve productivity.
+  </Card>
+  
+  <Card title="Web for Quick Access" icon="globe">
+    Use the web version when accessing from public computers or devices where you can't install apps.
+  </Card>
+  
+  <Card title="Report Issues" icon="bug">
+    If you encounter bugs or problems, report them through the in-app feedback or GitHub issues to help improve the app.
+  </Card>
+</CardGroup>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Authentication" icon="key" href="/guide/authentication">
+    Learn about signing in and managing your session
+  </Card>
+  
+  <Card title="Managing Calendars" icon="calendars" href="/guide/managing-calendars">
+    Control calendar visibility and sync settings
+  </Card>
+</CardGroup>

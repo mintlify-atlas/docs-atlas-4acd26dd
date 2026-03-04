@@ -1,0 +1,453 @@
+---
+title: 'Todo Management'
+description: 'Organize tasks with categories, scheduled dates, and drag-and-drop reordering'
+---
+
+## Overview
+
+Chronos Calendar includes a powerful todo management system that helps you organize tasks alongside your calendar events. Todos can be categorized into custom lists, scheduled for specific dates, and reordered via drag-and-drop.
+
+## Todo Lists (Categories)
+
+### System Lists
+
+Each user starts with default system lists:
+
+- **Inbox**: Default list for uncategorized tasks
+- **Today**: Tasks scheduled for today
+- **Upcoming**: Tasks scheduled for future dates
+
+<Note>
+  System lists cannot be deleted or renamed, but you can create unlimited custom lists.
+</Note>
+
+### Custom Lists
+
+Create your own lists to organize todos by project, context, or priority:
+
+<CardGroup cols={2}>
+  <Card title="Create List" icon="plus">
+    Add a new list with custom name and color
+  </Card>
+  <Card title="Customize" icon="palette">
+    Choose from multiple color options
+  </Card>
+  <Card title="Reorder" icon="arrows-up-down">
+    Drag lists to change their order
+  </Card>
+  <Card title="Delete" icon="trash">
+    Remove custom lists (todos are reassigned)
+  </Card>
+</CardGroup>
+
+### Creating a List
+
+```python
+# From todos.py:205-222
+@router.post("/todo-lists")
+@limiter.limit(settings.RATE_LIMIT_API)
+async def create_todo_list(request: Request, todo_list: TodoListCreate, current_user: CurrentUser):
+    supabase = get_supabase_client()
+    user_id = current_user["id"]
+
+    list_data = {
+        "user_id": user_id,
+        "name": Encryption.encrypt(todo_list.name, user_id),
+        "color": todo_list.color,
+        "is_system": False,
+        "order": get_next_order(supabase, "todo_lists", user_id),
+    }
+
+    result = supabase.table("todo_lists").insert(list_data).execute()
+    if not result.data:
+        raise HTTPException(status_code=500, detail="Failed to create list")
+    return to_camel_case(decrypt_field(result.data[0], "name", user_id, skip_if_system=True))
+```
+
+<Info>
+  List names are encrypted at rest for privacy, just like event data.
+</Info>
+
+## Managing Todos
+
+### Creating Todos
+
+Add a new todo with:
+
+- **Title**: Task description (required)
+- **List**: Target category (required)
+- **Scheduled Date**: Optional due date
+- **Completion Status**: Automatically set to incomplete
+
+```python
+# From todos.py:98-125
+@router.post("")
+@limiter.limit(settings.RATE_LIMIT_API)
+async def create_todo(request: Request, todo: TodoCreate, current_user: CurrentUser):
+    supabase = get_supabase_client()
+    user_id = current_user["id"]
+
+    # Validate list exists
+    list_check = (
+        supabase.table("todo_lists")
+        .select("id")
+        .eq("id", todo.listId)
+        .eq("user_id", user_id)
+        .execute()
+    )
+    if not list_check.data:
+        raise HTTPException(status_code=400, detail="Invalid list_id")
+
+    todo_data = {
+        "user_id": user_id,
+        "title": Encryption.encrypt(todo.title, user_id),
+        "list_id": todo.listId,
+        "scheduled_date": str(todo.scheduledDate) if todo.scheduledDate else None,
+        "order": get_next_order(supabase, "todos", user_id),
+        "completed": False,
+    }
+```
+
+### Updating Todos
+
+<Tabs>
+  <Tab title="Title">
+    Edit the todo text:
+
+    ```typescript
+    await api.updateTodo(todoId, {
+      title: "Updated task description"
+    })
+    ```
+  </Tab>
+
+  <Tab title="Completion">
+    Mark as complete/incomplete:
+
+    ```typescript
+    await api.updateTodo(todoId, {
+      completed: true
+    })
+    ```
+
+    Completed todos are typically shown with strikethrough or moved to a "Completed" section.
+  </Tab>
+
+  <Tab title="List">
+    Move to a different category:
+
+    ```typescript
+    await api.updateTodo(todoId, {
+      listId: newListId
+    })
+    ```
+
+    ```python
+    # From todos.py:138-147
+    if "list_id" in update_data and update_data["list_id"]:
+        list_check = (
+            supabase.table("todo_lists")
+            .select("id")
+            .eq("id", update_data["list_id"])
+            .eq("user_id", user_id)
+            .execute()
+        )
+        if not list_check.data:
+            raise HTTPException(status_code=400, detail="Invalid list_id")
+    ```
+  </Tab>
+
+  <Tab title="Scheduled Date">
+    Set or change the due date:
+
+    ```typescript
+    await api.updateTodo(todoId, {
+      scheduledDate: "2024-03-15"
+    })
+    ```
+
+    Todos with scheduled dates appear in date-based views and the "Today" list.
+  </Tab>
+</Tabs>
+
+### Deleting Todos
+
+Remove a todo permanently:
+
+```python
+# From todos.py:169-185
+@router.delete("/{todo_id}")
+@limiter.limit(settings.RATE_LIMIT_API)
+async def delete_todo(request: Request, todo_id: UUID, current_user: CurrentUser):
+    supabase = get_supabase_client()
+
+    result = (
+        supabase.table("todos")
+        .delete()
+        .eq("id", str(todo_id))
+        .eq("user_id", current_user["id"])
+        .execute()
+    )
+
+    if not result.data:
+        raise HTTPException(status_code=404, detail="Todo not found")
+
+    return {"message": "Todo deleted"}
+```
+
+<Note>
+  Deleting a todo is permanent and cannot be undone. Consider marking as complete instead.
+</Note>
+
+## Ordering and Reordering
+
+### Automatic Ordering
+
+New todos are automatically placed at the top of the list:
+
+```python
+# From todos.py:51-61
+def get_next_order(supabase, table: str, user_id: str) -> int:
+    result = (
+        supabase.table(table)
+        .select("order")
+        .eq("user_id", user_id)
+        .order("order")
+        .limit(1)
+        .execute()
+    )
+    min_order = result.data[0]["order"] if result.data else 0
+    return min_order - 1  # New items get negative order for top placement
+```
+
+This ensures new todos appear at the top without having to renumber existing items.
+
+### Drag-and-Drop Reordering
+
+Reorder todos by dragging them:
+
+```python
+# From todos.py:287-292
+@router.post("/reorder")
+@limiter.limit(settings.RATE_LIMIT_API)
+async def reorder_todos(request: Request, reorder_request: ReorderRequest, current_user: CurrentUser):
+    supabase = get_supabase_client()
+    reorder_items(supabase, "todos", current_user["id"], reorder_request.todoIds)
+    return {"message": "Reordered"}
+```
+
+<Accordion title="How reordering works">
+  When you drag a todo to a new position:
+
+  1. Frontend captures the new order of todo IDs
+  2. Array of IDs sent to `/reorder` endpoint
+  3. Backend assigns sequential order numbers (0, 1, 2, ...)
+  4. Database updated with new order values
+
+  ```python
+  # From todos.py:64-72
+  def reorder_items(supabase, table: str, user_id: str, item_ids: list[UUID]):
+      for index, item_id in enumerate(item_ids):
+          (
+              supabase.table(table)
+              .update({"order": index})
+              .eq("id", str(item_id))
+              .eq("user_id", user_id)
+              .execute()
+          )
+  ```
+</Accordion>
+
+### List Reordering
+
+You can also reorder the lists themselves:
+
+```python
+# From todos.py:279-284
+@router.post("/todo-lists/reorder")
+@limiter.limit(settings.RATE_LIMIT_API)
+async def reorder_todo_lists(request: Request, reorder_request: CategoryReorderRequest, current_user: CurrentUser):
+    supabase = get_supabase_client()
+    reorder_items(supabase, "todo_lists", current_user["id"], reorder_request.categoryIds)
+    return {"message": "Reordered"}
+```
+
+## Data Privacy and Encryption
+
+### Encrypted Fields
+
+Sensitive todo data is encrypted:
+
+- **Todo titles**: Task descriptions
+- **List names**: Category names (except system lists)
+
+```python
+# From todos.py:37-48
+def decrypt_field(data: dict, field: str, user_id: str, skip_if_system: bool = False) -> dict:
+    result = dict(data)
+    if skip_if_system and result.get("is_system"):
+        return result  # System lists not encrypted
+    if result.get(field):
+        try:
+            result[field] = Encryption.decrypt(result[field], user_id)
+        except ValueError:
+            logger.warning("Failed to decrypt %s for %s", field, result.get("id"))
+            result[field] = "[Decryption Error]"
+    return result
+```
+
+<Info>
+  System list names (Inbox, Today, Upcoming) are not encrypted since they're standard across all users.
+</Info>
+
+## API Endpoints
+
+### Todo Endpoints
+
+<CardGroup cols={2}>
+  <Card title="GET /todos" icon="list">
+    List all todos, optionally filtered by list ID
+  </Card>
+  <Card title="POST /todos" icon="plus">
+    Create a new todo
+  </Card>
+  <Card title="PUT /todos/:id" icon="pen">
+    Update an existing todo
+  </Card>
+  <Card title="DELETE /todos/:id" icon="trash">
+    Delete a todo
+  </Card>
+  <Card title="POST /todos/reorder" icon="arrows-up-down">
+    Reorder todos via drag-and-drop
+  </Card>
+</CardGroup>
+
+### List Management Endpoints
+
+<CardGroup cols={2}>
+  <Card title="GET /todo-lists" icon="folder">
+    List all todo lists/categories
+  </Card>
+  <Card title="POST /todo-lists" icon="plus">
+    Create a new list
+  </Card>
+  <Card title="PUT /todo-lists/:id" icon="pen">
+    Update list name or color
+  </Card>
+  <Card title="DELETE /todo-lists/:id" icon="trash">
+    Delete a custom list
+  </Card>
+  <Card title="POST /todo-lists/reorder" icon="arrows-up-down">
+    Reorder lists in sidebar
+  </Card>
+</CardGroup>
+
+## Rate Limiting
+
+All todo endpoints are rate-limited:
+
+```python
+# From todos.py:75-76
+@router.get("")
+@limiter.limit(settings.RATE_LIMIT_API)
+async def list_todos(...):
+```
+
+<Note>
+  Rate limits prevent abuse and ensure fair usage. The default limit is configured in `settings.RATE_LIMIT_API`.
+</Note>
+
+## Field Mapping
+
+### Camel Case Conversion
+
+API uses camelCase while database uses snake_case:
+
+```python
+# From todos.py:19-27
+CAMEL_TO_SNAKE = {"listId": "list_id", "scheduledDate": "scheduled_date"}
+SNAKE_TO_CAMEL = {
+    "user_id": "userId",
+    "list_id": "listId",
+    "scheduled_date": "scheduledDate",
+    "created_at": "createdAt",
+    "updated_at": "updatedAt",
+    "is_system": "isSystem",
+}
+```
+
+Conversion happens automatically in request/response handlers.
+
+## Local Storage
+
+Todos are also stored locally in IndexedDB for offline access:
+
+```typescript
+// From db.ts:63-73, 75-83
+export interface DexieTodo {
+  id: string;
+  userId: string;
+  title: string;
+  completed: boolean;
+  scheduledDate?: string;
+  listId: string;
+  order: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface DexieTodoList {
+  id: string;
+  userId: string;
+  name: string;
+  color: string;
+  icon?: string;
+  isSystem: boolean;
+  order: number;
+}
+```
+
+Database schema:
+
+```typescript
+// From db.ts:112-113
+todos: "id, listId, userId, order",
+todoLists: "id, userId, order",
+```
+
+## Integration with Calendar
+
+Todos with scheduled dates appear in calendar views:
+
+- **Day View**: Shows todos scheduled for that day
+- **Week View**: Displays todos across the week
+- **Today View**: Special filter for today's todos
+
+<Accordion title="Scheduled date filtering">
+  When rendering calendar views, todos are filtered by `scheduledDate`:
+
+  ```typescript
+  const todosForDate = todos.filter(todo => 
+    todo.scheduledDate === formatDate(currentDate)
+  )
+  ```
+
+  This allows you to see both events and tasks in a unified timeline.
+</Accordion>
+
+## Best Practices
+
+<CardGroup cols={2}>
+  <Card title="Use Categories" icon="folder-tree">
+    Organize todos into meaningful lists (Work, Personal, Shopping, etc.)
+  </Card>
+  <Card title="Schedule Tasks" icon="calendar-days">
+    Set scheduled dates to see todos alongside calendar events
+  </Card>
+  <Card title="Regular Cleanup" icon="broom">
+    Delete or archive completed todos to keep lists manageable
+  </Card>
+  <Card title="Priority Ordering" icon="arrow-up-1-9">
+    Drag important tasks to the top of each list
+  </Card>
+</CardGroup>

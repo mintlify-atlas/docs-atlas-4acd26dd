@@ -1,0 +1,361 @@
+---
+title: 'Todo Items'
+description: 'Manage individual todo items with full CRUD operations'
+---
+
+## Overview
+
+Todo items represent individual tasks within todo lists. Each item has a title, completion status, optional scheduled date, and belongs to a specific list.
+
+**Base URL**: `/todos`
+
+**Authentication**: All endpoints require authentication via Bearer token.
+
+**Encryption**: The `title` field is encrypted at rest using AES-GCM with user-specific keys.
+
+---
+
+## List Todo Items
+
+<Card title="GET /todos" icon="list">
+  Retrieve todo items for the authenticated user
+</Card>
+
+### Query Parameters
+
+<ParamField query="listId" type="string">
+  Filter todos by list ID. Use `"all"` or omit to retrieve all todos.
+</ParamField>
+
+### Response
+
+Returns an array of todo objects ordered by the `order` field.
+
+<ResponseField name="id" type="string" required>
+  Unique identifier for the todo (UUID)
+</ResponseField>
+
+<ResponseField name="userId" type="string" required>
+  User ID that owns this todo
+</ResponseField>
+
+<ResponseField name="title" type="string" required>
+  Todo title (decrypted from storage)
+</ResponseField>
+
+<ResponseField name="completed" type="boolean" required>
+  Whether the todo is marked as complete
+</ResponseField>
+
+<ResponseField name="scheduledDate" type="string | null" required>
+  ISO date string when the todo is scheduled (e.g., `"2026-03-15"`), or `null`
+</ResponseField>
+
+<ResponseField name="listId" type="string" required>
+  UUID of the list this todo belongs to
+</ResponseField>
+
+<ResponseField name="order" type="integer" required>
+  Sort order for displaying todos
+</ResponseField>
+
+<ResponseField name="createdAt" type="string" required>
+  ISO timestamp when the todo was created
+</ResponseField>
+
+<ResponseField name="updatedAt" type="string" required>
+  ISO timestamp when the todo was last updated
+</ResponseField>
+
+### Example Request
+
+```bash
+# Get all todos
+curl -X GET https://api.chronoscalendar.com/todos \
+  -H "Authorization: Bearer YOUR_TOKEN"
+
+# Get todos for a specific list
+curl -X GET "https://api.chronoscalendar.com/todos?listId=123e4567-e89b-12d3-a456-426614174000" \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+### Example Response
+
+```json
+[
+  {
+    "id": "abc12345-6789-def0-1234-56789abcdef0",
+    "userId": "user_123",
+    "title": "Review pull requests",
+    "completed": false,
+    "scheduledDate": "2026-03-05",
+    "listId": "123e4567-e89b-12d3-a456-426614174000",
+    "order": 0,
+    "createdAt": "2026-03-04T10:30:00Z",
+    "updatedAt": "2026-03-04T10:30:00Z"
+  },
+  {
+    "id": "def67890-abcd-1234-5678-90abcdef1234",
+    "userId": "user_123",
+    "title": "Buy groceries",
+    "completed": true,
+    "scheduledDate": null,
+    "listId": "987fcdeb-51a2-43f1-b123-456789abcdef",
+    "order": 1,
+    "createdAt": "2026-03-03T14:20:00Z",
+    "updatedAt": "2026-03-04T09:15:00Z"
+  }
+]
+```
+
+---
+
+## Create Todo Item
+
+<Card title="POST /todos" icon="plus">
+  Create a new todo item
+</Card>
+
+### Request Body
+
+<ParamField body="title" type="string" required>
+  Todo title (max 500 characters, will be encrypted)
+</ParamField>
+
+<ParamField body="listId" type="string" required>
+  UUID of the list this todo belongs to (must exist and belong to user)
+</ParamField>
+
+<ParamField body="scheduledDate" type="string | null">
+  ISO date string (e.g., `"2026-03-15"`), or `null`
+</ParamField>
+
+### Response
+
+Returns the created todo object.
+
+<ResponseField name="id" type="string" required>
+  Unique identifier for the created todo
+</ResponseField>
+
+<ResponseField name="userId" type="string" required>
+  User ID that owns this todo
+</ResponseField>
+
+<ResponseField name="title" type="string" required>
+  Todo title (decrypted)
+</ResponseField>
+
+<ResponseField name="completed" type="boolean" required>
+  Always `false` for newly created todos
+</ResponseField>
+
+<ResponseField name="scheduledDate" type="string | null" required>
+  Scheduled date if provided
+</ResponseField>
+
+<ResponseField name="listId" type="string" required>
+  List UUID
+</ResponseField>
+
+<ResponseField name="order" type="integer" required>
+  Automatically assigned order (minimum existing order - 1)
+</ResponseField>
+
+<ResponseField name="createdAt" type="string" required>
+  Creation timestamp
+</ResponseField>
+
+<ResponseField name="updatedAt" type="string" required>
+  Update timestamp (same as createdAt initially)
+</ResponseField>
+
+### Example Request
+
+```bash
+curl -X POST https://api.chronoscalendar.com/todos \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "title": "Finish API documentation",
+    "listId": "123e4567-e89b-12d3-a456-426614174000",
+    "scheduledDate": "2026-03-10"
+  }'
+```
+
+### Example Response
+
+```json
+{
+  "id": "new12345-6789-abcd-ef01-234567890abc",
+  "userId": "user_123",
+  "title": "Finish API documentation",
+  "completed": false,
+  "scheduledDate": "2026-03-10",
+  "listId": "123e4567-e89b-12d3-a456-426614174000",
+  "order": -1,
+  "createdAt": "2026-03-04T15:45:00Z",
+  "updatedAt": "2026-03-04T15:45:00Z"
+}
+```
+
+### Error Responses
+
+<Expandable title="400 Bad Request">
+  - Invalid `listId` (list doesn't exist or doesn't belong to user)
+  - Title exceeds 500 characters
+</Expandable>
+
+<Expandable title="500 Internal Server Error">
+  - Failed to create todo in database
+</Expandable>
+
+---
+
+## Update Todo Item
+
+<Card title="PUT /todos/{todo_id}" icon="pen">
+  Update an existing todo item
+</Card>
+
+### Path Parameters
+
+<ParamField path="todo_id" type="string" required>
+  UUID of the todo to update
+</ParamField>
+
+### Request Body
+
+All fields are optional. Only provided non-null fields will be updated.
+
+<ParamField body="title" type="string">
+  New todo title (max 500 characters, will be encrypted)
+</ParamField>
+
+<ParamField body="completed" type="boolean">
+  New completion status
+</ParamField>
+
+<ParamField body="scheduledDate" type="string | null">
+  New scheduled date (ISO format) or `null` to remove
+</ParamField>
+
+<ParamField body="listId" type="string">
+  Move todo to a different list (must exist and belong to user)
+</ParamField>
+
+<ParamField body="order" type="integer">
+  New sort order
+</ParamField>
+
+### Response
+
+Returns the updated todo object.
+
+### Example Request
+
+```bash
+curl -X PUT https://api.chronoscalendar.com/todos/abc12345-6789-def0-1234-56789abcdef0 \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "completed": true,
+    "scheduledDate": "2026-03-06"
+  }'
+```
+
+### Example Response
+
+```json
+{
+  "id": "abc12345-6789-def0-1234-56789abcdef0",
+  "userId": "user_123",
+  "title": "Review pull requests",
+  "completed": true,
+  "scheduledDate": "2026-03-06",
+  "listId": "123e4567-e89b-12d3-a456-426614174000",
+  "order": 0,
+  "createdAt": "2026-03-04T10:30:00Z",
+  "updatedAt": "2026-03-04T16:20:00Z"
+}
+```
+
+### Error Responses
+
+<Expandable title="404 Not Found">
+  - Todo not found or doesn't belong to the user
+</Expandable>
+
+<Expandable title="400 Bad Request">
+  - Invalid `listId` (list doesn't exist or doesn't belong to user)
+  - Title exceeds 500 characters
+</Expandable>
+
+---
+
+## Delete Todo Item
+
+<Card title="DELETE /todos/{todo_id}" icon="trash">
+  Delete a todo item
+</Card>
+
+### Path Parameters
+
+<ParamField path="todo_id" type="string" required>
+  UUID of the todo to delete
+</ParamField>
+
+### Response
+
+<ResponseField name="message" type="string">
+  Confirmation message: "Todo deleted"
+</ResponseField>
+
+### Example Request
+
+```bash
+curl -X DELETE https://api.chronoscalendar.com/todos/abc12345-6789-def0-1234-56789abcdef0 \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+### Example Response
+
+```json
+{
+  "message": "Todo deleted"
+}
+```
+
+### Error Responses
+
+<Expandable title="404 Not Found">
+  - Todo not found or doesn't belong to the user
+</Expandable>
+
+---
+
+## Data Security
+
+<Info>
+  **Encryption Details**: The `title` field is encrypted using AES-GCM (256-bit) with:
+  - User-specific keys derived via HKDF-SHA256 from master key
+  - 12-byte random initialization vector (IV) per encryption
+  - Additional authenticated data (AAD) including user ID
+  - Base64 encoding for storage (IV + ciphertext)
+  
+  If decryption fails, the title is returned as `"[Decryption Error]"`.
+</Info>
+
+## Field Validation
+
+<Warning>
+  **Important Constraints**:
+  - Titles are limited to 500 characters before encryption
+  - The `listId` must reference an existing list owned by the user
+  - Dates must be in ISO format (YYYY-MM-DD)
+  - Null values for non-nullable fields (`title`, `listId`, `completed`, `order`) are filtered out during updates
+</Warning>
+
+## Rate Limiting
+
+All endpoints are subject to the API rate limit configured in application settings. Exceeding the rate limit will return a `429 Too Many Requests` response.

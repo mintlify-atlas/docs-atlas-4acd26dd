@@ -1,0 +1,763 @@
+---
+title: 'Backend Architecture'
+description: 'FastAPI REST API, Supabase integration, and Google Calendar synchronization'
+icon: 'server'
+---
+
+## Overview
+
+The Chronos Calendar backend is a **FastAPI** application that provides a secure REST API for calendar and todo management, integrating with **Supabase** for authentication and database, and **Google Calendar API** for bidirectional event synchronization.
+
+## Technology Stack
+
+<CardGroup cols={2}>
+  <Card title="Framework" icon="python">
+    FastAPI with Uvicorn ASGI server for async request handling
+  </Card>
+  <Card title="Database" icon="database">
+    Supabase PostgreSQL with RLS policies and service role access
+  </Card>
+  <Card title="Authentication" icon="key">
+    Supabase Auth + Google OAuth 2.0 for secure user sessions
+  </Card>
+  <Card title="Encryption" icon="lock">
+    AES-256-GCM encryption with HKDF key derivation per user
+  </Card>
+</CardGroup>
+
+### Dependencies
+
+```python
+# Core framework
+fastapi
+uvicorn[standard]
+pydantic
+pydantic-settings
+
+# Database and auth
+supabase
+
+# Security and encryption
+cryptography
+python-multipart
+
+# HTTP client
+httpx
+
+# Rate limiting
+slowapi
+
+# AI/Embeddings
+cerebras-cloud-sdk
+fastembed>=0.2.0
+
+# Utilities
+cachetools
+
+# Testing
+pytest
+pytest-asyncio
+```
+
+**Location**: `backend/requirements.txt:1`
+
+## Application Architecture
+
+```
+backend/
+├── app/
+│   ├── main.py                 # FastAPI app initialization
+│   ├── config.py               # Settings management
+│   ├── core/
+│   │   ├── security.py         # Security middlewares
+│   │   ├── encryption.py       # AES-GCM encryption
+│   │   ├── csrf.py             # CSRF token handling
+│   │   ├── sessions.py         # Session cookie management
+│   │   └── dependencies.py     # Dependency injection
+│   ├── routers/
+│   │   ├── auth.py             # OAuth and session routes
+│   │   ├── calendar.py         # Calendar and event routes
+│   │   └── todos.py            # Todo list routes
+│   ├── models/                 # Pydantic models
+│   └── services/               # Business logic
+├── requirements.txt
+└── .env                        # Environment configuration
+```
+
+## FastAPI Application
+
+### App Initialization
+
+```python
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
+
+app = FastAPI(
+    title="Chronos Calendar API",
+    version="1.0.0",
+    redirect_slashes=False,
+    lifespan=lifespan
+)
+
+# Middleware stack (order matters!)
+app.add_middleware(GZipMiddleware, minimum_size=1000)
+app.add_middleware(SecurityHeadersMiddleware)
+app.add_middleware(CSRFMiddleware)
+app.add_middleware(FetchMetadataMiddleware)
+app.add_middleware(OriginValidationMiddleware)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=settings.cors_origins,
+    allow_credentials=True,
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allow_headers=["Content-Type", "Accept", "Authorization", "X-Request-ID", "X-CSRF-Token"],
+)
+
+# Router registration
+app.include_router(auth.router, prefix="/auth", tags=["auth"])
+app.include_router(calendar.router, prefix="/calendar", tags=["calendar"])
+app.include_router(todos.router, prefix="/todos", tags=["todos"])
+```
+
+**Location**: `backend/app/main.py:40`
+
+### Lifespan Management
+
+```python
+from contextlib import asynccontextmanager
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Startup: initialize resources
+    yield
+    # Shutdown: cleanup
+    await close_http_client()
+```
+
+**Location**: `backend/app/main.py:34`
+
+<Info>
+  The lifespan context manager ensures proper cleanup of async HTTP clients and other resources when the application shuts down.
+</Info>
+
+## Configuration Management
+
+### Settings with Pydantic
+
+```python
+from pydantic_settings import BaseSettings
+from pydantic import field_validator, model_validator
+
+class Settings(BaseSettings):
+    model_config = SettingsConfigDict(
+        env_file="../.env",
+        case_sensitive=True,
+        extra="ignore",
+    )
+    
+    # Supabase
+    SUPABASE_URL: str
+    SUPABASE_SERVICE_ROLE_KEY: str
+    
+    # Frontend URLs
+    FRONTEND_URL: str
+    CORS_ORIGINS: str
+    OAUTH_REDIRECT_URLS: str
+    DESKTOP_REDIRECT_URL: str
+    
+    # Encryption keys
+    ENCRYPTION_MASTER_KEY: str
+    CSRF_SECRET_KEY: str
+    
+    # Google OAuth
+    GOOGLE_CLIENT_ID: str
+    GOOGLE_CLIENT_SECRET: str
+    
+    # Session cookies
+    SESSION_COOKIE_NAME: str
+    REFRESH_COOKIE_NAME: str
+    COOKIE_MAX_AGE: int
+    COOKIE_SECURE: bool
+    COOKIE_SAMESITE: Literal["lax", "strict", "none"]
+    
+    # Rate limiting
+    RATE_LIMIT_AUTH: str      # e.g., "5/minute"
+    RATE_LIMIT_API: str       # e.g., "100/minute"
+    
+    ENVIRONMENT: str          # "development" | "production"
+```
+
+**Location**: `backend/app/config.py:10`
+
+### Security Validation
+
+```python
+@model_validator(mode="after")
+def validate_security_invariants(self):
+    if self.ENVIRONMENT == "production":
+        if not self.COOKIE_SECURE:
+            raise ValueError("COOKIE_SECURE must be true in production")
+        
+        if self.COOKIE_SAMESITE not in ("lax", "strict"):
+            raise ValueError("COOKIE_SAMESITE must be 'lax' or 'strict' in production")
+        
+        if self.SESSION_COOKIE_NAME.startswith("__Host-") and self.COOKIE_DOMAIN is not None:
+            raise ValueError("SESSION_COOKIE_NAME with __Host- prefix cannot set COOKIE_DOMAIN")
+    
+    return self
+```
+
+**Location**: `backend/app/config.py:68`
+
+<Note>
+  Pydantic validates configuration at startup, preventing production deployments with insecure settings.
+</Note>
+
+## Security Middleware Stack
+
+### 1. Security Headers Middleware
+
+Adds security headers to all responses:
+
+```python
+class SecurityHeadersMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next: RequestResponseEndpoint) -> Response:
+        request_id = str(uuid.uuid4())
+        request.state.request_id = request_id
+        request.state.csp_nonce = base64.b64encode(secrets.token_bytes(16)).decode("ascii").rstrip("=")
+        
+        response = await call_next(request)
+        
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["X-Frame-Options"] = "DENY"
+        response.headers["X-XSS-Protection"] = "1; mode=block"
+        response.headers["X-Request-ID"] = request_id
+        response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+        response.headers["Permissions-Policy"] = "geolocation=(), microphone=(), camera=()"
+        
+        if settings.ENVIRONMENT == "production":
+            response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+            response.headers["Content-Security-Policy"] = (
+                "default-src 'self'; "
+                f"script-src 'self' 'nonce-{csp_nonce}' https://apis.google.com; "
+                f"style-src 'self' 'nonce-{csp_nonce}' https://fonts.googleapis.com; "
+                "font-src 'self' https://fonts.gstatic.com; "
+                "img-src 'self' data: https:; "
+                "connect-src 'self' https://*.supabase.co https://apis.google.com; "
+                "frame-src https://accounts.google.com; "
+                "object-src 'none'; "
+                "base-uri 'self';"
+            )
+        
+        return response
+```
+
+**Location**: `backend/app/core/security.py:133`
+
+### 2. Origin Validation Middleware
+
+Validates the `Origin` header on mutating requests:
+
+```python
+class OriginValidationMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next: RequestResponseEndpoint) -> Response:
+        if request.method in {"POST", "PUT", "PATCH", "DELETE"}:
+            origin = request.headers.get("origin")
+            if origin and origin not in settings.cors_origins:
+                return JSONResponse(status_code=403, content={"detail": "Invalid origin"})
+        
+        return await call_next(request)
+```
+
+**Location**: `backend/app/core/security.py:50`
+
+<Info>
+  Certain paths like `/calendar/webhook` are exempt from origin validation to allow Google Calendar webhooks.
+</Info>
+
+### 3. CSRF Middleware
+
+Validates CSRF tokens on authenticated mutating requests:
+
+```python
+class CSRFMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next: RequestResponseEndpoint) -> Response:
+        if request.method in {"POST", "PUT", "PATCH", "DELETE"}:
+            if _has_auth_cookie(request):
+                cookie_token = get_csrf_cookie_token(request)
+                request_token = get_csrf_request_token(request)
+                
+                if not cookie_token or not request_token or not hmac.compare_digest(cookie_token, request_token):
+                    return JSONResponse(status_code=403, content={"detail": "Invalid CSRF token"})
+                
+                if not validate_csrf_token(token=request_token, secret=settings.CSRF_SECRET_KEY):
+                    return JSONResponse(status_code=403, content={"detail": "Invalid CSRF token"})
+        
+        return await call_next(request)
+```
+
+**Location**: `backend/app/core/security.py:74`
+
+See [Security Architecture](/architecture/security) for detailed CSRF implementation.
+
+### 4. Fetch Metadata Middleware
+
+Implements Fetch Metadata Request Headers policy:
+
+```python
+class FetchMetadataMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next: RequestResponseEndpoint) -> Response:
+        if request.method in {"POST", "PUT", "PATCH", "DELETE"}:
+            if _has_auth_cookie(request):
+                sec_fetch_site = request.headers.get("sec-fetch-site")
+                if sec_fetch_site and sec_fetch_site not in {"same-origin", "same-site", "none"}:
+                    return JSONResponse(status_code=403, content={"detail": "Blocked by Fetch Metadata policy"})
+        
+        return await call_next(request)
+```
+
+**Location**: `backend/app/core/security.py:102`
+
+This prevents cross-site request forgery from untrusted origins.
+
+## API Router Structure
+
+### Authentication Router (`/auth`)
+
+```python
+router = APIRouter()
+
+@router.post("/web/login")
+async def web_login():
+    """Initiate OAuth flow, return Google authorization URL"""
+
+@router.get("/web/callback")
+async def web_callback(code: str):
+    """Exchange OAuth code for tokens, create session"""
+
+@router.post("/logout")
+async def logout():
+    """Clear session cookies"""
+
+@router.post("/refresh")
+async def refresh_session():
+    """Refresh access token using refresh token"""
+
+@router.get("/csrf")
+async def get_csrf_token():
+    """Issue CSRF token for authenticated requests"""
+```
+
+**Key Features:**
+- Rate limiting: `@limiter.limit("5/minute")` on login/callback
+- Session cookies with HTTP-only, Secure, SameSite flags
+- CSRF token issuance on successful authentication
+
+### Calendar Router (`/calendar`)
+
+```python
+router = APIRouter()
+
+@router.get("/accounts")
+async def get_google_accounts():
+    """List all connected Google accounts"""
+
+@router.get("/calendars")
+async def get_calendars(account_id: str):
+    """Fetch calendars for a Google account"""
+
+@router.get("/events")
+async def get_events(
+    calendar_id: str,
+    sync_token: Optional[str] = None,
+    time_min: Optional[str] = None,
+    time_max: Optional[str] = None,
+):
+    """Fetch events with incremental sync support"""
+
+@router.post("/events")
+async def create_event(event: CreateEventInput):
+    """Create new event in Google Calendar"""
+
+@router.put("/events/{event_id}")
+async def update_event(event_id: str, event: UpdateEventInput):
+    """Update existing event"""
+
+@router.delete("/events/{event_id}")
+async def delete_event(event_id: str, calendar_id: str):
+    """Delete event from Google Calendar"""
+
+@router.post("/webhook")
+async def calendar_webhook(request: Request):
+    """Receive Google Calendar push notifications"""
+
+@router.post("/watch")
+async def watch_calendar(calendar_id: str):
+    """Register webhook for calendar changes"""
+```
+
+**Key Features:**
+- Incremental sync with `sync_token` parameter
+- Automatic encryption/decryption of sensitive fields
+- Webhook validation with Google's signatures
+- Batch operations for efficient data transfer
+
+### Todos Router (`/todos`)
+
+```python
+router = APIRouter()
+
+@router.get("/lists")
+async def get_todo_lists():
+    """Fetch all todo lists for authenticated user"""
+
+@router.post("/lists")
+async def create_todo_list(list_data: CreateTodoListInput):
+    """Create new todo list"""
+
+@router.get("/")
+async def get_todos(list_id: Optional[str] = None):
+    """Fetch todos, optionally filtered by list"""
+
+@router.post("/")
+async def create_todo(todo: CreateTodoInput):
+    """Create new todo item"""
+
+@router.put("/{todo_id}")
+async def update_todo(todo_id: str, todo: UpdateTodoInput):
+    """Update todo item"""
+
+@router.delete("/{todo_id}")
+async def delete_todo(todo_id: str):
+    """Delete todo item"""
+
+@router.post("/reorder")
+async def reorder_todos(order: List[str]):
+    """Bulk reorder todos by IDs"""
+```
+
+## Supabase Integration
+
+### Client Initialization
+
+```python
+from supabase import create_client, Client
+
+def get_supabase_client() -> Client:
+    settings = get_settings()
+    return create_client(
+        supabase_url=settings.SUPABASE_URL,
+        supabase_key=settings.SUPABASE_SERVICE_ROLE_KEY,
+    )
+```
+
+### Database Operations
+
+```python
+# Insert event with encryption
+async def store_event(user_id: str, calendar_id: str, event: dict):
+    supabase = get_supabase_client()
+    
+    encrypted_fields = Encryption.batch_encrypt(
+        fields={
+            "summary": event.get("summary"),
+            "description": event.get("description"),
+            "location": event.get("location"),
+        },
+        user_id=user_id,
+    )
+    
+    result = supabase.table("events").insert({
+        "user_id": user_id,
+        "calendar_id": calendar_id,
+        "google_event_id": event["id"],
+        "encrypted_summary": encrypted_fields["summary"],
+        "encrypted_description": encrypted_fields["description"],
+        "encrypted_location": encrypted_fields["location"],
+        "start": event["start"],
+        "end": event["end"],
+        "status": event["status"],
+        "updated": event["updated"],
+    }).execute()
+    
+    return result.data[0]
+```
+
+### Authentication
+
+Supabase handles user authentication:
+
+```python
+from supabase import User
+
+async def get_current_user(request: Request) -> User:
+    access_token = request.cookies.get(settings.SESSION_COOKIE_NAME)
+    if not access_token:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    
+    supabase = get_supabase_client()
+    user = supabase.auth.get_user(access_token)
+    
+    if not user:
+        raise HTTPException(status_code=401, detail="Invalid token")
+    
+    return user
+```
+
+## Google Calendar Integration
+
+### OAuth Flow
+
+```python
+from google.oauth2.credentials import Credentials
+from google_auth_oauthlib.flow import Flow
+
+@router.post("/web/login")
+async def web_login():
+    flow = Flow.from_client_config(
+        client_config={
+            "web": {
+                "client_id": settings.GOOGLE_CLIENT_ID,
+                "client_secret": settings.GOOGLE_CLIENT_SECRET,
+                "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+                "token_uri": "https://oauth2.googleapis.com/token",
+            }
+        },
+        scopes=[
+            "https://www.googleapis.com/auth/calendar",
+            "https://www.googleapis.com/auth/userinfo.email",
+            "https://www.googleapis.com/auth/userinfo.profile",
+        ],
+        redirect_uri=settings.OAUTH_REDIRECT_URLS[0],
+    )
+    
+    auth_url, state = flow.authorization_url(
+        access_type="offline",
+        include_granted_scopes="true",
+        prompt="consent",
+    )
+    
+    return {"auth_url": auth_url, "state": state}
+```
+
+### API Client
+
+```python
+import httpx
+from typing import AsyncGenerator
+
+HTTP_CLIENT: httpx.AsyncClient | None = None
+
+def get_http_client() -> httpx.AsyncClient:
+    global HTTP_CLIENT
+    if HTTP_CLIENT is None:
+        HTTP_CLIENT = httpx.AsyncClient(timeout=30.0)
+    return HTTP_CLIENT
+
+async def fetch_google_calendar_events(
+    access_token: str,
+    calendar_id: str,
+    sync_token: Optional[str] = None,
+    time_min: Optional[str] = None,
+    time_max: Optional[str] = None,
+):
+    client = get_http_client()
+    
+    params = {
+        "maxResults": 2500,
+        "singleEvents": True,
+        "orderBy": "startTime",
+    }
+    
+    if sync_token:
+        params["syncToken"] = sync_token
+    else:
+        if time_min:
+            params["timeMin"] = time_min
+        if time_max:
+            params["timeMax"] = time_max
+    
+    response = await client.get(
+        f"https://www.googleapis.com/calendar/v3/calendars/{calendar_id}/events",
+        params=params,
+        headers={"Authorization": f"Bearer {access_token}"},
+    )
+    
+    response.raise_for_status()
+    return response.json()
+```
+
+### Webhook Registration
+
+```python
+@router.post("/watch")
+async def watch_calendar(calendar_id: str, user: User = Depends(get_current_user)):
+    client = get_http_client()
+    access_token = await get_user_access_token(user.id)
+    
+    webhook_url = f"{settings.WEBHOOK_BASE_URL}/calendar/webhook"
+    channel_id = str(uuid.uuid4())
+    
+    response = await client.post(
+        f"https://www.googleapis.com/calendar/v3/calendars/{calendar_id}/events/watch",
+        json={
+            "id": channel_id,
+            "type": "web_hook",
+            "address": webhook_url,
+            "expiration": int((time.time() + 7 * 24 * 3600) * 1000),  # 7 days
+        },
+        headers={"Authorization": f"Bearer {access_token}"},
+    )
+    
+    response.raise_for_status()
+    channel_data = response.json()
+    
+    # Store channel info for renewal
+    await store_webhook_channel(user.id, calendar_id, channel_data)
+    
+    return channel_data
+```
+
+## Encryption Layer
+
+See [Security Architecture](/architecture/security#encryption-implementation) for detailed encryption implementation using AES-256-GCM.
+
+## Rate Limiting
+
+### SlowAPI Integration
+
+```python
+from slowapi import Limiter
+from slowapi.util import get_remote_address
+
+limiter = Limiter(key_func=get_remote_address)
+
+@router.post("/web/login")
+@limiter.limit("5/minute")
+async def web_login(request: Request):
+    # OAuth login logic
+    pass
+```
+
+**Configuration**:
+- Auth endpoints: `5/minute` per IP
+- API endpoints: `100/minute` per user
+
+## Error Handling
+
+### Global Exception Handler
+
+```python
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    logger.exception("Unhandled exception: %s", exc)
+    return JSONResponse(
+        status_code=500,
+        content={"detail": "Internal server error"},
+    )
+```
+
+**Location**: `backend/app/main.py:43`
+
+### Custom Exceptions
+
+```python
+class AuthenticationError(HTTPException):
+    def __init__(self, detail: str = "Authentication failed"):
+        super().__init__(status_code=401, detail=detail)
+
+class EncryptionError(HTTPException):
+    def __init__(self, detail: str = "Encryption failed"):
+        super().__init__(status_code=500, detail=detail)
+
+class GoogleAPIError(HTTPException):
+    def __init__(self, detail: str = "Google API request failed"):
+        super().__init__(status_code=502, detail=detail)
+```
+
+## Logging
+
+```python
+import logging
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)-8s %(name)s  %(message)s",
+    datefmt="%H:%M:%S",
+)
+
+# Suppress noisy logs
+logging.getLogger("httpx").setLevel(logging.WARNING)
+logging.getLogger("uvicorn.access").setLevel(logging.WARNING)
+logging.getLogger("httpcore").setLevel(logging.WARNING)
+```
+
+**Location**: `backend/app/main.py:21`
+
+Request logs include:
+- Request ID (from `SecurityHeadersMiddleware`)
+- HTTP method and path
+- Response status code
+- Duration in milliseconds
+
+## Performance Optimizations
+
+<CardGroup cols={2}>
+  <Card title="GZIP Compression" icon="file-zipper">
+    Responses >1KB are compressed, reducing bandwidth by 70-90%
+  </Card>
+  <Card title="Async I/O" icon="bolt">
+    HTTPX async client pools connections for parallel Google API requests
+  </Card>
+  <Card title="Batch Encryption" icon="layer-group">
+    Multiple fields encrypted in one pass, deriving key only once
+  </Card>
+  <Card title="Database Indexes" icon="magnifying-glass">
+    Supabase indexes on user_id, calendar_id, and google_event_id
+  </Card>
+</CardGroup>
+
+## Deployment
+
+### Running Locally
+
+```bash
+# Install dependencies
+pip install -r requirements.txt
+
+# Set environment variables
+cp .env.example .env
+# Edit .env with your credentials
+
+# Run development server
+uvicorn app.main:app --reload --port 8000
+```
+
+### Production Deployment
+
+```bash
+# Use production ASGI server
+uvicorn app.main:app \
+  --host 0.0.0.0 \
+  --port 8000 \
+  --workers 4 \
+  --log-level info \
+  --access-log \
+  --no-access-log  # Use middleware logging instead
+```
+
+<Note>
+  For production, use a reverse proxy like Nginx or deploy to a platform like Render, Railway, or AWS with auto-scaling.
+</Note>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Security Architecture" icon="shield" href="/architecture/security">
+    Learn about encryption, CSRF, and session security
+  </Card>
+  <Card title="Frontend Architecture" icon="browser" href="/architecture/frontend">
+    Explore the React frontend and offline-first data layer
+  </Card>
+</CardGroup>

@@ -1,0 +1,483 @@
+---
+title: 'Recurring Events'
+description: 'Support for complex recurring events using RRULE, including exceptions and modifications'
+---
+
+## Overview
+
+Chronos Calendar provides full support for recurring events using the iCalendar RRULE standard. This includes complex recurrence patterns, exceptions (cancelled/modified instances), and efficient expansion for display.
+
+## How Recurring Events Work
+
+### Master Events
+
+A recurring event series is represented by a "master event" that contains:
+
+- **RRULE**: Recurrence rule defining the pattern
+- **EXDATE**: Exception dates (instances that don't occur)
+- **RDATE**: Additional dates (extra instances)
+- **Start Date**: First occurrence
+- **Duration**: Length of each instance
+
+<Note>
+  Master events are not displayed directly in the calendar. They serve as templates for generating individual instances.
+</Note>
+
+### Event Expansion
+
+To display recurring events, Chronos expands masters into individual instances:
+
+```typescript
+// From recurrence.ts:110-119
+export function expandRecurringEvents(
+  masters: CalendarEvent[],
+  exceptions: CalendarEvent[],
+  rangeStart: Date,
+  rangeEnd: Date
+): ExpandedEvent[] {
+  const cacheKey = computeCacheKey(masters, exceptions, rangeStart, rangeEnd)
+  if (expansionCache && expansionCache.key === cacheKey) {
+    return [...expansionCache.result]  // Return cached result
+  }
+```
+
+<Info>
+  Expansion results are cached to avoid recalculating when the view hasn't changed. This significantly improves performance.
+</Info>
+
+## Recurrence Rules (RRULE)
+
+### Supported Patterns
+
+<Tabs>
+  <Tab title="Daily">
+    ```rrule
+    RRULE:FREQ=DAILY;INTERVAL=1
+    ```
+
+    Repeats every day.
+
+    Example: Daily standup meeting
+  </Tab>
+
+  <Tab title="Weekly">
+    ```rrule
+    RRULE:FREQ=WEEKLY;BYDAY=MO,WE,FR
+    ```
+
+    Repeats on specific days of the week.
+
+    Example: Gym sessions on Monday, Wednesday, Friday
+  </Tab>
+
+  <Tab title="Monthly">
+    ```rrule
+    RRULE:FREQ=MONTHLY;BYMONTHDAY=15
+    ```
+
+    Repeats on a specific day each month.
+
+    Example: Monthly team meeting on the 15th
+  </Tab>
+
+  <Tab title="Yearly">
+    ```rrule
+    RRULE:FREQ=YEARLY;BYMONTH=12;BYMONTHDAY=25
+    ```
+
+    Repeats annually on a specific date.
+
+    Example: Christmas celebration
+  </Tab>
+
+  <Tab title="Custom">
+    ```rrule
+    RRULE:FREQ=WEEKLY;INTERVAL=2;BYDAY=TU,TH;UNTIL=20241231T235959Z
+    ```
+
+    Complex patterns with multiple constraints:
+    - Every 2 weeks
+    - On Tuesday and Thursday
+    - Until end of 2024
+  </Tab>
+</Tabs>
+
+### RRULE Components
+
+<CardGroup cols={2}>
+  <Card title="FREQ" icon="repeat">
+    Frequency: DAILY, WEEKLY, MONTHLY, YEARLY
+  </Card>
+  <Card title="INTERVAL" icon="clock">
+    Repeat every N periods (e.g., every 2 weeks)
+  </Card>
+  <Card title="BYDAY" icon="calendar-week">
+    Days of week: MO, TU, WE, TH, FR, SA, SU
+  </Card>
+  <Card title="BYMONTHDAY" icon="calendar-day">
+    Day of month: 1-31
+  </Card>
+  <Card title="COUNT" icon="hashtag">
+    Maximum number of occurrences
+  </Card>
+  <Card title="UNTIL" icon="flag-checkered">
+    End date for the series
+  </Card>
+</CardGroup>
+
+## Building RRULE Strings
+
+The system constructs complete RRULE strings with proper date/time handling:
+
+```typescript
+// From recurrence.ts:92-108
+function buildRRuleString(dtstart: Date, rruleStrings: string[], options?: { timeZone?: string; allDay?: boolean }): string {
+  if (options?.allDay) {
+    const year = dtstart.getFullYear()
+    const month = String(dtstart.getMonth() + 1).padStart(2, '0')
+    const day = String(dtstart.getDate()).padStart(2, '0')
+    return `DTSTART;VALUE=DATE:${year}${month}${day}\n${rruleStrings.join('\n')}`
+  }
+
+  if (options?.timeZone) {
+    const localTime = formatDateTimeForTimezone(dtstart, options.timeZone)
+    const formatted = localTime.replace(/[-:]/g, '')
+    return `DTSTART;TZID=${options.timeZone}:${formatted}\n${rruleStrings.join('\n')}`
+  }
+
+  const utcFormatted = dtstart.toISOString().replace(/[-:]/g, '').split('.')[0] + 'Z'
+  return `DTSTART:${utcFormatted}\n${rruleStrings.join('\n')}`
+}
+```
+
+<Accordion title="Date formatting for all-day vs timed events">
+  **All-Day Events**:
+  ```
+  DTSTART;VALUE=DATE:20240315
+  RRULE:FREQ=DAILY
+  ```
+
+  **Timed Events with Time Zone**:
+  ```
+  DTSTART;TZID=America/New_York:20240315T140000
+  RRULE:FREQ=DAILY
+  ```
+
+  **Timed Events in UTC**:
+  ```
+  DTSTART:20240315T140000Z
+  RRULE:FREQ=DAILY
+  ```
+
+  The format depends on whether the event is all-day and whether a time zone is specified.
+</Accordion>
+
+## Exception Handling
+
+### Cancelled Instances
+
+Individual occurrences can be cancelled without affecting the rest of the series:
+
+```typescript
+// From recurrence.ts:164-179
+for (const instanceDate of instances) {
+  const matchingException = masterExceptions.find((exc) =>
+    instanceMatchesException(
+      instanceDate,
+      exc.recurringEventId === master.id ? exc.originalStartTime : undefined,
+      isAllDay
+    )
+  )
+
+  if (matchingException) {
+    if (matchingException.status === 'cancelled') continue  // Skip cancelled
+    expanded.push({
+      ...matchingException,
+      isVirtual: false,
+      originalMasterId: master.id,
+    })
+  }
+}
+```
+
+Cancelled instances are identified by `status: 'cancelled'` and excluded from the calendar.
+
+### Modified Instances
+
+An exception can modify specific details of an occurrence:
+
+- **Time Change**: Rescheduled to different time
+- **Title Change**: Different event name
+- **Location Change**: Different venue
+- **Duration Change**: Shorter or longer
+
+<Note>
+  When an exception exists, it completely overrides the master event for that specific date.
+</Note>
+
+### Exception Matching
+
+```typescript
+// From recurrence.ts:75-90
+function instanceMatchesException(
+  instanceDate: Date,
+  exceptionOriginalStart: EventDateTime | undefined,
+  isAllDay: boolean
+): boolean {
+  if (!exceptionOriginalStart) return false
+
+  if (isAllDay) {
+    return exceptionOriginalStart.date === formatDateString(instanceDate)
+  }
+
+  const exceptionTime = exceptionOriginalStart.dateTime
+    ? new Date(exceptionOriginalStart.dateTime).getTime()
+    : 0
+  return Math.abs(instanceDate.getTime() - exceptionTime) < 1000  // 1 second tolerance
+}
+```
+
+Exceptions are matched by comparing the `originalStartTime` field with the generated instance date.
+
+## Virtual Instances
+
+Generated instances are marked as "virtual":
+
+```typescript
+// From recurrence.ts:180-192
+else {
+  const endDate = new Date(instanceDate.getTime() + durationMs)
+  expanded.push({
+    ...master,
+    id: `${master.id}_${instanceDate.getTime()}`,  // Unique ID
+    start: formatDateTime(instanceDate, isAllDay, timeZone),
+    end: formatDateTime(endDate, isAllDay, master.end.timeZone),
+    recurrence: undefined,  // Remove RRULE from instances
+    recurringEventId: master.id,  // Link to master
+    isVirtual: true,  // Mark as virtual
+    originalMasterId: master.id,
+  })
+}
+```
+
+<Info>
+  Virtual instances have synthetic IDs like `master_id_timestamp` and are generated on-the-fly rather than stored in the database.
+</Info>
+
+## Event Duration Calculation
+
+Each instance uses the master event's duration:
+
+```typescript
+// From recurrence.ts:51-59
+function getEventDurationMs(event: CalendarEvent): number {
+  const startMs = event.start.dateTime
+    ? new Date(event.start.dateTime).getTime()
+    : new Date((event.start.date ?? '1970-01-01') + 'T00:00:00').getTime()
+  const endMs = event.end.dateTime
+    ? new Date(event.end.dateTime).getTime()
+    : new Date((event.end.date ?? '1970-01-01') + 'T00:00:00').getTime()
+  return endMs - startMs
+}
+```
+
+The duration is added to each instance's start time to calculate its end time.
+
+## Expansion Caching
+
+### Cache Key Generation
+
+```typescript
+// From recurrence.ts:16-25
+function computeCacheKey(
+  masters: CalendarEvent[],
+  exceptions: CalendarEvent[],
+  rangeStart: Date,
+  rangeEnd: Date
+): string {
+  const masterIds = masters.map((m) => `${m.id}:${m.updated}`).sort().join(',')
+  const exceptionIds = exceptions.map((e) => `${e.id}:${e.updated}`).sort().join(',')
+  return `${masterIds}|${exceptionIds}|${rangeStart.getTime()}|${rangeEnd.getTime()}`
+}
+```
+
+Cache keys include:
+- All master event IDs and update timestamps
+- All exception event IDs and update timestamps
+- Date range (start and end)
+
+This ensures the cache is invalidated when any event changes.
+
+### Performance Benefits
+
+<CardGroup cols={2}>
+  <Card title="Instant Rendering" icon="bolt">
+    Cached expansions return immediately without recalculation
+  </Card>
+  <Card title="View Navigation" icon="arrows-left-right">
+    Switching between views reuses cached results
+  </Card>
+  <Card title="Memory Efficient" icon="memory">
+    Only one expansion cached at a time
+  </Card>
+  <Card title="Smart Invalidation" icon="rotate">
+    Cache cleared when events or date range changes
+  </Card>
+</CardGroup>
+
+## Merging with Regular Events
+
+Expanded recurring events are merged with regular events:
+
+```typescript
+// From recurrence.ts:200-228
+export function mergeEventsWithExpanded(
+  regularEvents: CalendarEvent[],
+  expandedEvents: ExpandedEvent[]
+): ExpandedEvent[] {
+  const merged: ExpandedEvent[] = []
+  const addedIds = new Set<string>()
+
+  for (const event of regularEvents) {
+    if (!addedIds.has(event.id)) {
+      merged.push({ ...event, isVirtual: false })
+      addedIds.add(event.id)
+    }
+  }
+
+  for (const event of expandedEvents) {
+    if (!addedIds.has(event.id)) {
+      merged.push(event)
+      addedIds.add(event.id)
+    }
+  }
+
+  return merged.sort((a, b) => {
+    const toTime = (e: ExpandedEvent) =>
+      e.start.dateTime
+        ? new Date(e.start.dateTime).getTime()
+        : new Date((e.start.date ?? '1970-01-01') + 'T00:00:00').getTime()
+    return toTime(a) - toTime(b)
+  })
+}
+```
+
+The final result is sorted chronologically.
+
+## Usage in Calendar Views
+
+### Complete Workflow
+
+```typescript
+// From recurrence.ts:230-239
+export function getExpandedEvents(
+  events: CalendarEvent[],
+  masters: CalendarEvent[],
+  exceptions: CalendarEvent[],
+  rangeStart: Date,
+  rangeEnd: Date
+): ExpandedEvent[] {
+  const expanded = expandRecurringEvents(masters, exceptions, rangeStart, rangeEnd)
+  return mergeEventsWithExpanded(events, expanded)
+}
+```
+
+<Accordion title="Step-by-step process">
+  1. **Load from Database**: Fetch events, masters, and exceptions from IndexedDB
+  2. **Expand Masters**: Generate instances for each master within the date range
+  3. **Apply Exceptions**: Replace instances with exceptions where they exist
+  4. **Merge with Regular Events**: Combine expanded instances with one-time events
+  5. **Sort Chronologically**: Order all events by start time
+  6. **Render**: Display in calendar UI
+</Accordion>
+
+## Time Zone Handling
+
+### All-Day Events
+
+All-day recurring events use date-only format:
+
+```typescript
+if (isAllDay) {
+  return { date: formatDateString(date) }
+}
+```
+
+No time zone conversion needed.
+
+### Timed Events
+
+Timed events preserve the original time zone:
+
+```typescript
+// From recurrence.ts:35-49
+function formatDateTimeForTimezone(date: Date, timeZone: string): string {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hourCycle: 'h23',
+  }).formatToParts(date)
+
+  const get = (type: string) => parts.find((p) => p.type === type)?.value || ''
+  return `${get('year')}-${get('month')}-${get('day')}T${get('hour')}:${get('minute')}:${get('second')}`
+}
+```
+
+This ensures recurring events respect their original time zone, even when expanded.
+
+## RRULE Library Integration
+
+### Parsing RRULE Strings
+
+```typescript
+// From recurrence.ts:27-33
+function parseRRuleString(rruleString: string, tzid?: string): RRuleSet | RRule | null {
+  try {
+    return rrulestr(rruleString, { forceset: true, tzid })
+  } catch {
+    return null
+  }
+}
+```
+
+The `rrule` library handles complex parsing and validation.
+
+### Instance Generation
+
+```typescript
+// From recurrence.ts:157-162
+let instances: Date[]
+try {
+  instances = rruleSet.between(rangeStart, rangeEnd, true)
+} catch {
+  continue
+}
+```
+
+The library's `between()` method efficiently generates instances within the date range.
+
+<Note>
+  Chronos uses the [rrule](https://github.com/jakubroztocil/rrule) library, which is the standard JavaScript implementation of the iCalendar RRULE specification.
+</Note>
+
+## Best Practices
+
+<CardGroup cols={2}>
+  <Card title="Limit Date Ranges" icon="calendar-range">
+    Expand only the visible date range to minimize computation
+  </Card>
+  <Card title="Cache Results" icon="database">
+    Reuse expansion results when possible
+  </Card>
+  <Card title="Handle Errors" icon="shield-check">
+    Gracefully skip events with invalid RRULEs
+  </Card>
+  <Card title="Test Edge Cases" icon="flask">
+    Validate complex patterns like leap years and DST transitions
+  </Card>
+</CardGroup>

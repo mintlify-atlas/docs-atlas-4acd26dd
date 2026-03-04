@@ -1,0 +1,124 @@
+---
+title: "List Calendars"
+api: "GET /calendar/calendars"
+description: "Retrieve all Google calendars for the authenticated user"
+---
+
+## Endpoint
+
+```
+GET /calendar/calendars
+```
+
+Retrieves all Google calendars associated with the authenticated user's connected Google accounts. This endpoint returns calendars from all linked Google accounts.
+
+## Authentication
+
+Requires a valid authentication token in the request headers.
+
+## Response
+
+<ResponseField name="calendars" type="array" required>
+  Array of calendar objects
+  
+  <Expandable title="calendar object">
+    <ResponseField name="id" type="string" required>
+      Internal calendar ID (Chronos database ID)
+    </ResponseField>
+    
+    <ResponseField name="google_calendar_id" type="string" required>
+      Google Calendar ID (external identifier)
+    </ResponseField>
+    
+    <ResponseField name="name" type="string" required>
+      Calendar display name
+    </ResponseField>
+    
+    <ResponseField name="color" type="string">
+      Calendar background color (hex format)
+    </ResponseField>
+    
+    <ResponseField name="is_primary" type="boolean" required>
+      Whether this is the user's primary calendar
+    </ResponseField>
+    
+    <ResponseField name="google_account_id" type="string" required>
+      ID of the associated Google account
+    </ResponseField>
+    
+    <ResponseField name="account_email" type="string">
+      Email address of the Google account
+    </ResponseField>
+    
+    <ResponseField name="account_name" type="string">
+      Display name of the Google account
+    </ResponseField>
+    
+    <ResponseField name="needs_reauth" type="boolean">
+      Whether the account requires re-authentication
+    </ResponseField>
+    
+    <ResponseField name="access_role" type="string">
+      User's access role for this calendar (e.g., "owner", "writer", "reader")
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+## Example Request
+
+```bash cURL
+curl -X GET "https://api.chronoscalendar.com/calendar/calendars" \
+  -H "Authorization: Bearer YOUR_ACCESS_TOKEN"
+```
+
+## Example Response
+
+```json
+{
+  "calendars": [
+    {
+      "id": "cal_abc123",
+      "google_calendar_id": "user@gmail.com",
+      "name": "Personal",
+      "color": "#9fe1e7",
+      "is_primary": true,
+      "google_account_id": "acc_xyz789",
+      "account_email": "user@gmail.com",
+      "account_name": "John Doe",
+      "needs_reauth": false,
+      "access_role": "owner"
+    },
+    {
+      "id": "cal_def456",
+      "google_calendar_id": "work@company.com",
+      "name": "Work Calendar",
+      "color": "#f09300",
+      "is_primary": false,
+      "google_account_id": "acc_xyz789",
+      "account_email": "user@gmail.com",
+      "account_name": "John Doe",
+      "needs_reauth": false,
+      "access_role": "writer"
+    }
+  ]
+}
+```
+
+## Error Responses
+
+<ResponseField name="401 Unauthorized">
+  Authentication token is missing or invalid
+</ResponseField>
+
+<ResponseField name="500 Internal Server Error">
+  An unexpected error occurred while fetching calendars
+</ResponseField>
+
+## Related Endpoints
+
+- [Sync Events](/api/calendar/sync-events) - Sync events from specific calendars
+- [Get Events](/api/calendar/get-events) - Retrieve events from calendars
+
+## Source Code Reference
+
+See implementation in `backend/app/routers/calendar.py:111-114` and `backend/app/calendar/db.py:190-198`

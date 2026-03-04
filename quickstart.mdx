@@ -1,80 +1,359 @@
 ---
-title: "Quickstart"
-description: "Start building awesome documentation in minutes"
+title: Quickstart
+description: Get Chronos Calendar running in under 10 minutes with your first successful login and calendar sync
 ---
 
-## Get started in three steps
+## Prerequisites
 
-Get your documentation site running locally and make your first customization.
+Before you begin, ensure you have:
 
-### Step 1: Set up your local environment
+- **Node.js 18+** and **npm** installed
+- **Python 3.11+** with **pip**
+- **A Supabase account** (free tier works)
+- **Google Cloud Console access** for OAuth credentials
+
+<Note>
+  This quickstart focuses on getting the web version running locally. For desktop builds, see the [Installation](/installation) guide.
+</Note>
+
+## Quick Setup
+
+<Steps>
+  <Step title="Clone and Install">
+    Get the source code and install dependencies:
+
+    ```bash
+    # Clone the repository (or extract your source files)
+    cd chronos-calendar
+
+    # Install backend dependencies
+    cd backend
+    pip install -r requirements.txt
+    cd ..
+
+    # Install frontend dependencies
+    cd frontend
+    npm install
+    cd ..
+    ```
+
+    The backend requires these key packages:
+    - `fastapi` - Modern async web framework
+    - `supabase` - Authentication and database client
+    - `uvicorn[standard]` - ASGI server with performance extras
+    - `slowapi` - Rate limiting
+    - `cryptography` - Field-level encryption
+  </Step>
+
+  <Step title="Set Up Supabase">
+    Create a new Supabase project and get your credentials:
+
+    1. Go to [supabase.com](https://supabase.com) and create a new project
+    2. Navigate to **Settings > API** and copy:
+       - Project URL (e.g., `https://xxxxx.supabase.co`)
+       - Service role key (secret key, not anon key)
+    3. Go to **Authentication > Providers** and enable **Google**
+
+    <Warning>
+      Use the **service role key**, not the anon key. The service role key is required for server-side operations.
+    </Warning>
+  </Step>
+
+  <Step title="Configure Google OAuth">
+    Set up OAuth 2.0 credentials for Google Calendar access:
+
+    1. Visit [Google Cloud Console](https://console.cloud.google.com)
+    2. Create a new project or select an existing one
+    3. Enable the **Google Calendar API**:
+       - Go to **APIs & Services > Library**
+       - Search for "Google Calendar API" and enable it
+    4. Create OAuth 2.0 credentials:
+       - Go to **APIs & Services > Credentials**
+       - Click **Create Credentials > OAuth client ID**
+       - Choose **Web application**
+       - Add authorized redirect URIs:
+         ```
+         http://localhost:5174/auth/web/callback
+         http://localhost:8000/auth/desktop/callback
+         ```
+    5. Copy your **Client ID** and **Client Secret**
+
+    <Note>
+      The Google OAuth setup requires both the Calendar API scope and offline access to receive refresh tokens.
+    </Note>
+  </Step>
+
+  <Step title="Configure Environment">
+    Create a `.env` file in the root directory:
+
+    ```bash
+    # Supabase
+    SUPABASE_URL=https://xxxxx.supabase.co
+    SUPABASE_SERVICE_ROLE_KEY=your-service-role-key
+
+    # Frontend & CORS
+    FRONTEND_URL=http://localhost:5174
+    CORS_ORIGINS=
+    DESKTOP_PROXY_ORIGINS=
+    OAUTH_REDIRECT_URLS=http://localhost:5174/auth/web/callback
+    DESKTOP_REDIRECT_URL=chronoscalendar://auth/callback
+
+    # Security
+    ENCRYPTION_MASTER_KEY=your-32-byte-hex-key
+    CSRF_SECRET_KEY=your-secret-key
+    CSRF_COOKIE_NAME=chronos_csrf
+    CSRF_TOKEN_TTL_SECONDS=3600
+
+    # Google OAuth
+    GOOGLE_CLIENT_ID=your-client-id.apps.googleusercontent.com
+    GOOGLE_CLIENT_SECRET=your-client-secret
+
+    # Webhooks
+    WEBHOOK_BASE_URL=http://localhost:8000
+
+    # Session Cookies
+    SESSION_COOKIE_NAME=chronos_session
+    REFRESH_COOKIE_NAME=chronos_refresh
+    COOKIE_MAX_AGE=604800
+    COOKIE_DOMAIN=
+    COOKIE_SECURE=false
+    COOKIE_SAMESITE=lax
+
+    # Environment
+    ENVIRONMENT=development
+
+    # Rate Limits
+    RATE_LIMIT_AUTH=10/minute
+    RATE_LIMIT_API=100/minute
+
+    # Backend URL for Vite proxy
+    VITE_BACKEND_URL=http://localhost:8000
+    ```
+
+    <Warning>
+      Generate secure random keys for production:
+      ```bash
+      # Generate ENCRYPTION_MASTER_KEY (32 bytes as hex)
+      python -c "import secrets; print(secrets.token_hex(32))"
+      
+      # Generate CSRF_SECRET_KEY
+      python -c "import secrets; print(secrets.token_urlsafe(32))"
+      ```
+    </Warning>
+  </Step>
+
+  <Step title="Start the Backend">
+    Launch the FastAPI server:
+
+    ```bash
+    cd backend
+    uvicorn app.main:app --reload --port 8000
+    ```
+
+    You should see:
+    ```
+    INFO:     Uvicorn running on http://127.0.0.1:8000
+    INFO:     Application startup complete.
+    ```
+
+    Verify the API is running:
+    ```bash
+    curl http://localhost:8000/health
+    # Expected: {"status":"healthy"}
+    ```
+
+    <Note>
+      The backend runs on port **8000** by default. The frontend Vite dev server will proxy `/api/*` requests to this backend.
+    </Note>
+  </Step>
+
+  <Step title="Start the Frontend">
+    In a new terminal, launch the Vite dev server:
+
+    ```bash
+    cd frontend
+    npm run dev
+    ```
+
+    The app will be available at `http://localhost:5174`
+
+    Vite configuration from `frontend/vite.config.ts:18-32`:
+    ```typescript
+    proxy: {
+      "/api": {
+        target: env.VITE_BACKEND_URL || "http://localhost:8000",
+        changeOrigin: false,
+        rewrite: (path) => path.replace(/^/api/, ""),
+      },
+    }
+    ```
+  </Step>
+
+  <Step title="First Login">
+    Complete your first authentication:
+
+    1. Open `http://localhost:5174` in your browser
+    2. Click **Sign in with Google**
+    3. Authorize Chronos Calendar to access your Google Calendar
+    4. You'll be redirected back with an active session
+
+    The authentication flow (from `frontend/src/contexts/AuthContext.tsx:87-106`):
+    ```typescript
+    const loginWithGoogle = async () => {
+      setLoading(true);
+      setError(null);
+      const redirectTo = isDesktop() ? getDesktopOAuthRedirectUrl() : undefined;
+      const response = await api.get<{ redirectUrl: string }>(
+        "/auth/google/login",
+        redirectTo ? { redirectTo } : undefined,
+      );
+      if (isDesktop()) {
+        await openExternal(response.redirectUrl);
+        setLoading(false);
+        return;
+      }
+      window.location.href = response.redirectUrl;
+    }
+    ```
+
+    The backend handles the OAuth flow in `backend/app/routers/auth.py:117-141`, requesting these scopes:
+    ```python
+    "scopes": "https://www.googleapis.com/auth/calendar https://www.googleapis.com/auth/calendar.events"
+    ```
+  </Step>
+
+  <Step title="First Calendar Sync">
+    After logging in, sync your Google Calendar:
+
+    1. Navigate to the Calendar view in the app
+    2. Click **Sync Calendars** or wait for automatic sync
+    3. Your Google Calendar events will stream in via Server-Sent Events (SSE)
+
+    The sync process:
+    - Backend fetches events from Google Calendar API
+    - Events are encrypted and stored in Supabase
+    - Real-time updates stream via SSE
+    - Frontend caches events with TanStack Query
+
+    <Note>
+      The first sync might take a few seconds depending on the number of calendars and events you have.
+    </Note>
+  </Step>
+</Steps>
+
+## Verify Your Setup
+
+Confirm everything is working:
 
 <AccordionGroup>
-  <Accordion icon="copy" title="Clone your docs locally">
-    During the onboarding process, you created a GitHub repository with your docs content if you didn't already have one. You can find a link to this repository in your [dashboard](https://dashboard.mintlify.com).
-    
-    To clone the repository locally so that you can make and preview changes to your docs, follow the [Cloning a repository](https://docs.github.com/en/repositories/creating-and-managing-repositories/cloning-a-repository) guide in the GitHub docs.
+  <Accordion title="Check Backend Health">
+    ```bash
+    curl http://localhost:8000/health
+    # Expected: {"status":"healthy"}
+
+    curl http://localhost:8000/
+    # Expected: {"message":"Chronos Calendar API"}
+    ```
   </Accordion>
-  <Accordion icon="rectangle-terminal" title="Start the preview server">
-    1. Install the Mintlify CLI: `npm i -g mint`
-    2. Navigate to your docs directory and run: `mint dev`
-    3. Open `http://localhost:3000` to see your docs live!
-    
-    <Tip>Your preview updates automatically as you edit files.</Tip>
+
+  <Accordion title="Check Session Cookies">
+    After logging in, verify cookies are set:
+    - Open browser DevTools > Application > Cookies
+    - Look for `chronos_session` and `chronos_refresh`
+    - Both should be **HttpOnly** and **SameSite=Lax**
+  </Accordion>
+
+  <Accordion title="Check CSRF Token">
+    The frontend automatically handles CSRF tokens:
+    - Check for `chronos_csrf` cookie
+    - The AuthContext handles refresh with CSRF bootstrap (from `AuthContext.tsx:49-60`):
+    ```typescript
+    const refreshWithCsrfBootstrap = async () => {
+      const refresh = () => api.post<SessionResponse>("/auth/refresh");
+      try {
+        return await refresh();
+      } catch (err) {
+        if (err instanceof ApiError && err.status === 403) {
+          await api.get<{ ok: boolean }>("/auth/csrf");
+          return refresh();
+        }
+        throw err;
+      }
+    }
+    ```
+  </Accordion>
+
+  <Accordion title="Check Calendar Sync">
+    1. Open the browser DevTools > Network tab
+    2. Filter for `/calendar/sync` requests
+    3. You should see EventSource connections with `text/event-stream`
+    4. Events stream in real-time with format:
+       ```
+       event: calendar
+       data: {"calendar_id":"...","events":[...]}
+       ```
   </Accordion>
 </AccordionGroup>
 
-### Step 2: Deploy your changes
+## Common Issues
 
 <AccordionGroup>
-  <Accordion icon="github" title="Install our GitHub app">
-    Install the Mintlify GitHub app from your [dashboard](https://dashboard.mintlify.com/settings/organization/github-app).
-    
-    Our GitHub app automatically deploys your changes to your docs site, so you don't need to manage deployments yourself.
-</Accordion>
-<Accordion icon="palette" title="Update your site name and colors">
-    For a first change, let's update the name and colors of your docs site.
+  <Accordion title="CORS Errors">
+    If you see CORS errors in the browser console:
+    - Verify `FRONTEND_URL=http://localhost:5174` in `.env`
+    - Check that `CORS_ORIGINS` matches your frontend URL
+    - Ensure the backend is running on port 8000
+    - Restart both frontend and backend after `.env` changes
+  </Accordion>
 
-    1. Open `docs.json` in your editor.
-    2. Change the `"name"` field to your project name.
-    3. Update the `"colors"` to match your brand.
-    4. Save and see your changes instantly at `http://localhost:3000`.
+  <Accordion title="OAuth Redirect Mismatch">
+    If Google OAuth fails with redirect URI mismatch:
+    - Verify the redirect URI in Google Cloud Console exactly matches:
+      ```
+      http://localhost:5174/auth/web/callback
+      ```
+    - Check `OAUTH_REDIRECT_URLS` in `.env` matches the URI
+    - Ensure no trailing slashes
+  </Accordion>
 
-    <Tip>Try changing the primary color to see an immediate difference!</Tip>
+  <Accordion title="Session Not Persisting">
+    If you're logged out on page refresh:
+    - Check browser cookies are enabled
+    - Verify `COOKIE_SECURE=false` for local development
+    - Check `COOKIE_SAMESITE=lax` (not `none` or `strict`)
+    - Clear browser cookies and try again
+  </Accordion>
+
+  <Accordion title="Database Connection Failed">
+    If the backend can't connect to Supabase:
+    - Verify `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` are correct
+    - Check your Supabase project is not paused (free tier pauses after inactivity)
+    - Test the connection with a simple Supabase query
   </Accordion>
 </AccordionGroup>
 
-### Step 3: Go live
+## Next Steps
 
-<Accordion icon="rocket" title="Publish your docs">
-  1. Commit and push your changes.
-  2. Your docs will update and be live in moments!
-</Accordion>
-
-## Next steps
-
-Now that you have your docs running, explore these key features:
+Now that you have Chronos Calendar running:
 
 <CardGroup cols={2}>
-
-<Card title="Write Content" icon="pen-to-square" href="/essentials/markdown">
-  Learn MDX syntax and start writing your documentation.
-</Card>
-
-<Card title="Customize style" icon="palette" href="/essentials/settings">
-  Make your docs match your brand perfectly.
-</Card>
-
-<Card title="Add code examples" icon="square-code" href="/essentials/code">
-  Include syntax-highlighted code blocks.
-</Card>
-
-<Card title="API documentation" icon="code" href="/api-reference/introduction">
-  Auto-generate API docs from OpenAPI specs.
-</Card>
-
+  <Card title="Explore the API" icon="code" href="/api-reference">
+    Learn about all available endpoints and their parameters
+  </Card>
+  
+  <Card title="Set Up Desktop App" icon="desktop" href="/installation#desktop-app">
+    Build the Electrobun desktop version with native features
+  </Card>
+  
+  <Card title="Configure Webhooks" icon="webhook" href="/webhooks">
+    Enable real-time Google Calendar notifications
+  </Card>
+  
+  <Card title="Deploy to Production" icon="rocket" href="/deployment">
+    Deploy your instance to production hosting
+  </Card>
 </CardGroup>
 
 <Note>
-  **Need help?** See our [full documentation](https://mintlify.com/docs) or join our [community](https://mintlify.com/community).
+  For a complete development setup with database migrations, testing, and advanced configuration, see the full [Installation Guide](/installation).
 </Note>

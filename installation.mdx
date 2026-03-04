@@ -1,0 +1,685 @@
+---
+title: Installation
+description: Complete setup instructions for Chronos Calendar web and desktop applications
+---
+
+## Overview
+
+Chronos Calendar can be run as a web application (Vite dev server) or as a native desktop app (Electrobun). This guide covers both deployment methods with detailed configuration steps.
+
+<CardGroup cols={2}>
+  <Card title="Web Application" icon="globe">
+    React + Vite frontend with FastAPI backend, suitable for browser-based access
+  </Card>
+  <Card title="Desktop Application" icon="desktop">
+    Electrobun-powered native app with system keychain integration
+  </Card>
+</CardGroup>
+
+## System Requirements
+
+### For Web Development
+
+- **Node.js**: 18.x or higher
+- **npm**: 9.x or higher (comes with Node.js)
+- **Python**: 3.11 or higher
+- **pip**: Latest version
+- **Git**: For version control
+
+### For Desktop Builds
+
+All of the above, plus:
+
+- **Bun**: Latest version (Electrobun dependency)
+- **Platform-specific tools**:
+  - **macOS**: Xcode Command Line Tools
+  - **Linux**: Build essentials (`build-essential` on Ubuntu/Debian)
+  - **Windows**: Visual Studio Build Tools
+
+<Note>
+  The desktop app uses Electrobun, which requires Bun runtime. Install from [bun.sh](https://bun.sh).
+</Note>
+
+## Initial Setup
+
+<Steps>
+  <Step title="Get the Source Code">
+    Clone the repository or extract your source files:
+
+    ```bash
+    git clone <your-repository-url>
+    cd chronos-calendar
+    ```
+
+    Project structure:
+    ```
+    chronos-calendar/
+    ├── frontend/              # React + TypeScript frontend
+    │   ├── src/              # Source code
+    │   ├── src-electrobun/   # Desktop app configuration
+    │   ├── package.json      # Frontend dependencies
+    │   └── vite.config.ts    # Vite configuration
+    ├── backend/              # FastAPI Python backend
+    │   ├── app/             # Application code
+    │   ├── requirements.txt # Python dependencies
+    │   └── main.py          # Entry point
+    └── .env                 # Environment configuration
+    ```
+  </Step>
+
+  <Step title="Install Backend Dependencies">
+    Set up the Python environment:
+
+    ```bash
+    cd backend
+
+    # Create a virtual environment (recommended)
+    python -m venv venv
+
+    # Activate the virtual environment
+    # On macOS/Linux:
+    source venv/bin/activate
+    # On Windows:
+    .\venv\Scripts\activate
+
+    # Install dependencies
+    pip install -r requirements.txt
+    ```
+
+    Key dependencies from `requirements.txt`:
+    ```txt
+    fastapi                 # Modern async web framework
+    uvicorn[standard]       # ASGI server with performance extras
+    supabase               # Supabase client for auth and database
+    pydantic               # Data validation and settings
+    pydantic-settings      # Environment-based configuration
+    cryptography           # Field-level encryption
+    slowapi                # Rate limiting
+    httpx                  # Async HTTP client for Google APIs
+    python-multipart       # File upload support
+    cachetools             # In-memory caching
+    fastembed>=0.2.0       # AI embeddings
+    cerebras-cloud-sdk     # AI provider SDK
+    pytest                 # Testing framework
+    pytest-asyncio         # Async test support
+    ```
+
+    <Note>
+      Using a virtual environment is strongly recommended to isolate dependencies.
+    </Note>
+  </Step>
+
+  <Step title="Install Frontend Dependencies">
+    Install Node.js packages:
+
+    ```bash
+    cd ../frontend
+    npm install
+    ```
+
+    Key dependencies from `package.json`:
+    ```json
+    {
+      "dependencies": {
+        "react": "^18.3.1",
+        "react-dom": "^18.3.1",
+        "react-router-dom": "^7.11.0",
+        "@tanstack/react-query": "^5.90.16",
+        "@tanstack/react-query-persist-client": "^5.90.18",
+        "@supabase/supabase-js": "^2.89.0",
+        "date-fns": "^4.1.0",
+        "zod": "^4.3.4",
+        "zustand": "^5.0.9",
+        "dexie": "^4.2.1",
+        "dexie-react-hooks": "^4.2.0",
+        "@radix-ui/react-dialog": "^1.1.15",
+        "@radix-ui/react-dropdown-menu": "^2.1.16",
+        "@dnd-kit/core": "^6.3.1",
+        "lucide-react": "^0.562.0",
+        "sonner": "^2.0.7",
+        "rrule": "^2.8.1"
+      },
+      "devDependencies": {
+        "vite": "^5.4.10",
+        "@vitejs/plugin-react": "^4.3.3",
+        "typescript": "~5.6.2",
+        "tailwindcss": "^4.1.18",
+        "eslint": "^9.13.0"
+      }
+    }
+    ```
+  </Step>
+
+  <Step title="Create Supabase Project">
+    Set up your Supabase backend:
+
+    1. **Create a project** at [supabase.com](https://supabase.com)
+    2. **Note your credentials** from Settings > API:
+       - Project URL: `https://xxxxx.supabase.co`
+       - Service Role Key (secret, not anon key)
+    3. **Enable Google Auth** in Authentication > Providers
+    4. **Set up database tables** (if not using migrations):
+
+    You'll need these tables:
+    - `google_accounts` - Store connected Google accounts
+    - `google_account_tokens` - Store encrypted OAuth tokens
+    - `calendars` - Calendar metadata
+    - `events` - Calendar events (encrypted)
+    - `todos` - Todo items (encrypted)
+    - `todo_lists` - Todo list containers
+    - `revoked_tokens` - Track revoked session tokens
+
+    <Warning>
+      Enable Row Level Security (RLS) on all tables to ensure users can only access their own data.
+    </Warning>
+  </Step>
+
+  <Step title="Configure Google Cloud">
+    Set up Google Calendar API access:
+
+    1. **Create or select a project** in [Google Cloud Console](https://console.cloud.google.com)
+    2. **Enable Google Calendar API**:
+       - Navigate to APIs & Services > Library
+       - Search for "Google Calendar API"
+       - Click Enable
+    3. **Create OAuth 2.0 Credentials**:
+       - Go to APIs & Services > Credentials
+       - Click Create Credentials > OAuth client ID
+       - Application type: Web application
+       - Name: "Chronos Calendar"
+    4. **Add Authorized Redirect URIs**:
+       ```
+       # For local development
+       http://localhost:5174/auth/web/callback
+       http://localhost:8000/auth/desktop/callback
+       
+       # For production (add your domains)
+       https://yourdomain.com/auth/web/callback
+       https://api.yourdomain.com/auth/desktop/callback
+       ```
+    5. **Copy credentials**:
+       - Client ID: `xxxxx.apps.googleusercontent.com`
+       - Client Secret: `xxxxx`
+
+    The backend requests these OAuth scopes (`backend/app/routers/auth.py:135-136`):
+    ```python
+    "scopes": "https://www.googleapis.com/auth/calendar https://www.googleapis.com/auth/calendar.events",
+    "query_params": {"access_type": "offline", "prompt": "consent"},
+    ```
+
+    <Note>
+      `access_type: "offline"` ensures you receive a refresh token for long-term calendar access.
+    </Note>
+  </Step>
+
+  <Step title="Configure Environment Variables">
+    Create `.env` in the project root:
+
+    ```bash
+    # Copy the example and edit
+    touch .env
+    ```
+
+    Complete `.env` configuration:
+
+    ```bash
+    # ======================
+    # SUPABASE
+    # ======================
+    SUPABASE_URL=https://xxxxx.supabase.co
+    SUPABASE_SERVICE_ROLE_KEY=your-service-role-key-here
+
+    # ======================
+    # FRONTEND & CORS
+    # ======================
+    FRONTEND_URL=http://localhost:5174
+    CORS_ORIGINS=
+    DESKTOP_PROXY_ORIGINS=
+    OAUTH_REDIRECT_URLS=http://localhost:5174/auth/web/callback
+    DESKTOP_REDIRECT_URL=chronoscalendar://auth/callback
+
+    # ======================
+    # SECURITY & ENCRYPTION
+    # ======================
+    # Generate with: python -c "import secrets; print(secrets.token_hex(32))"
+    ENCRYPTION_MASTER_KEY=your-64-char-hex-key-here
+    
+    # Generate with: python -c "import secrets; print(secrets.token_urlsafe(32))"
+    CSRF_SECRET_KEY=your-secret-key-here
+    CSRF_COOKIE_NAME=chronos_csrf
+    CSRF_TOKEN_TTL_SECONDS=3600
+
+    # ======================
+    # GOOGLE OAUTH
+    # ======================
+    GOOGLE_CLIENT_ID=your-client-id.apps.googleusercontent.com
+    GOOGLE_CLIENT_SECRET=your-client-secret
+
+    # ======================
+    # WEBHOOKS
+    # ======================
+    # For local dev, use ngrok or similar:
+    # WEBHOOK_BASE_URL=https://your-ngrok-url.ngrok.io
+    WEBHOOK_BASE_URL=http://localhost:8000
+
+    # ======================
+    # SESSION COOKIES
+    # ======================
+    SESSION_COOKIE_NAME=chronos_session
+    REFRESH_COOKIE_NAME=chronos_refresh
+    COOKIE_MAX_AGE=604800
+    COOKIE_DOMAIN=
+    COOKIE_SECURE=false
+    COOKIE_SAMESITE=lax
+
+    # ======================
+    # ENVIRONMENT
+    # ======================
+    ENVIRONMENT=development
+
+    # ======================
+    # RATE LIMITING
+    # ======================
+    RATE_LIMIT_AUTH=10/minute
+    RATE_LIMIT_API=100/minute
+
+    # ======================
+    # VITE (Frontend)
+    # ======================
+    VITE_BACKEND_URL=http://localhost:8000
+    ```
+
+    Configuration validation happens at startup (`backend/app/config.py:68-83`):
+    ```python
+    @model_validator(mode="after")
+    def validate_security_invariants(self):
+        if self.ENVIRONMENT == "production":
+            if not self.COOKIE_SECURE:
+                raise ValueError("COOKIE_SECURE must be true in production")
+
+            if self.COOKIE_SAMESITE not in ("lax", "strict"):
+                raise ValueError("COOKIE_SAMESITE must be 'lax' or 'strict' in production")
+    ```
+
+    <Warning>
+      For production:
+      - Set `COOKIE_SECURE=true`
+      - Set `COOKIE_SAMESITE=lax` or `strict`
+      - Use `__Host-` prefix for cookie names (requires HTTPS and no domain)
+      - Generate strong random keys for encryption and CSRF
+    </Warning>
+  </Step>
+</Steps>
+
+## Web Application
+
+### Development Mode
+
+Run both frontend and backend in development mode:
+
+<CodeGroup>
+```bash Terminal 1 - Backend
+cd backend
+source venv/bin/activate  # Activate virtual environment
+uvicorn app.main:app --reload --port 8000
+```
+
+```bash Terminal 2 - Frontend
+cd frontend
+npm run dev
+```
+</CodeGroup>
+
+The application will be available at:
+- **Frontend**: `http://localhost:5174`
+- **Backend**: `http://localhost:8000`
+- **API Docs**: `http://localhost:8000/docs` (auto-generated Swagger UI)
+
+### Production Build
+
+Build optimized production bundles:
+
+```bash
+# Build frontend
+cd frontend
+npm run build
+
+# Output will be in frontend/dist/
+```
+
+For backend deployment:
+
+```bash
+# Run with production settings
+cd backend
+uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 4
+```
+
+<Note>
+  For production hosting, configure the environment variables and use a process manager like systemd or Docker to run the application.
+</Note>
+
+## Desktop Application
+
+### Install Electrobun
+
+First, install Bun (Electrobun dependency):
+
+```bash
+# macOS/Linux
+curl -fsSL https://bun.sh/install | bash
+
+# Windows
+powershell -c "irm bun.sh/install.ps1 | iex"
+```
+
+Then install Electrobun dependencies:
+
+```bash
+cd frontend/src-electrobun
+bun install
+```
+
+### Desktop Configuration
+
+Electrobun config (`frontend/src-electrobun/electrobun.config.ts`):
+
+```typescript
+import type { ElectrobunConfig } from "electrobun";
+
+export default {
+  app: {
+    name: "ChronosCalendar",
+    identifier: "com.chronos.calendar",
+    version: "0.1.0",
+    urlSchemes: ["chronoscalendar"],
+  },
+  build: {
+    mac: {
+      bundleCEF: false,
+    },
+    linux: {
+      bundleCEF: false,
+    },
+    win: {
+      bundleCEF: false,
+    },
+  },
+} satisfies ElectrobunConfig;
+```
+
+The `urlSchemes` array defines the custom URL protocol (`chronoscalendar://`) used for OAuth callbacks.
+
+### Development Mode
+
+Run the desktop app in development:
+
+```bash
+cd frontend
+npm run dev:electrobun
+```
+
+This executes (`package.json:11`):
+```json
+"dev:electrobun": "cd src-electrobun && bun install && bun dev"
+```
+
+### Production Build
+
+Build platform-specific desktop apps:
+
+<CodeGroup>
+```bash macOS
+cd frontend
+npm run build:electrobun:prod
+
+# Output: frontend/src-electrobun/out/ChronosCalendar.app
+```
+
+```bash Windows
+cd frontend
+npm run build:electrobun:prod
+
+# Output: frontend/src-electrobun/out/ChronosCalendar.exe
+```
+
+```bash Linux
+cd frontend
+npm run build:electrobun:prod
+
+# Output: frontend/src-electrobun/out/ChronosCalendar.AppImage
+```
+</CodeGroup>
+
+Build scripts from `package.json:12-13`:
+```json
+"build:electrobun": "cd src-electrobun && bun install && bun build",
+"build:electrobun:prod": "cd src-electrobun && bun install && bun build:prod"
+```
+
+### Desktop-Specific Features
+
+The desktop app includes platform-specific code:
+
+**Keychain Integration** (`frontend/src/main.tsx:47-57`):
+```typescript
+initTokenStorage()
+  .then(() => render())
+  .catch((err) => {
+    if (isDesktop()) {
+      render(
+        `Could not access the system keychain: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    } else {
+      render();
+    }
+  });
+```
+
+**OAuth Callback Handler** (`backend/app/routers/auth.py:275-373`):
+```python
+@router.get("/desktop/callback", include_in_schema=False)
+async def desktop_callback(
+    code: str | None = Query(default=None),
+    error: str | None = Query(default=None),
+):
+    # Redirects to chronoscalendar://auth/callback?code=...
+    base = settings.DESKTOP_REDIRECT_URL
+    # ...
+    target_url = urlunparse(parsed._replace(query=urlencode(query)))
+```
+
+<Note>
+  The desktop app stores OAuth tokens in the system keychain (macOS Keychain, Windows Credential Manager, Linux Secret Service) for enhanced security.
+</Note>
+
+## Vite Proxy Configuration
+
+The frontend proxies API requests to the backend (`frontend/vite.config.ts:17-33`):
+
+```typescript
+server: {
+  port: 5174,
+  strictPort: true,
+  proxy: {
+    "/api": {
+      target: env.VITE_BACKEND_URL || "http://localhost:8000",
+      changeOrigin: false,
+      rewrite: (path) => path.replace(/^\/api/, ""),
+      configure: (proxy) => {
+        proxy.on("proxyRes", (proxyRes) => {
+          const setCookie = proxyRes.headers["set-cookie"];
+          if (setCookie) {
+            proxyRes.headers["set-cookie"] = (
+              Array.isArray(setCookie) ? setCookie : [setCookie]
+            ).map((cookie) => cookie.replace(/Domain=[^;]+;?\s*/gi, ""));
+          }
+        });
+      },
+    },
+  },
+}
+```
+
+This configuration:
+- Routes `/api/*` requests to the backend
+- Strips `/api` prefix before forwarding
+- Removes cookie domain restrictions for localhost development
+
+## Testing the Installation
+
+### Backend Tests
+
+Run the test suite:
+
+```bash
+cd backend
+pytest
+```
+
+### Manual Testing
+
+Verify each component:
+
+<Steps>
+  <Step title="Test Backend">
+    ```bash
+    # Health check
+    curl http://localhost:8000/health
+    # Expected: {"status":"healthy"}
+
+    # API root
+    curl http://localhost:8000/
+    # Expected: {"message":"Chronos Calendar API"}
+
+    # Check API docs
+    open http://localhost:8000/docs
+    ```
+  </Step>
+
+  <Step title="Test Authentication">
+    1. Open `http://localhost:5174`
+    2. Click "Sign in with Google"
+    3. Complete OAuth flow
+    4. Verify session cookies in DevTools
+    5. Check `/auth/session` endpoint returns user data
+  </Step>
+
+  <Step title="Test Calendar Sync">
+    1. After authentication, navigate to calendar view
+    2. Click sync or wait for auto-sync
+    3. Open Network tab, filter for EventSource
+    4. Verify events stream via SSE
+    5. Check events appear in the UI
+  </Step>
+
+  <Step title="Test Todo Management">
+    1. Create a new todo list
+    2. Add todo items
+    3. Verify encryption (check database - content should be encrypted)
+    4. Test drag-and-drop reordering
+    5. Schedule a todo for a specific date
+  </Step>
+</Steps>
+
+## Troubleshooting
+
+<AccordionGroup>
+  <Accordion title="Module Import Errors (Python)">
+    If you see `ModuleNotFoundError`:
+    ```bash
+    # Ensure virtual environment is activated
+    source venv/bin/activate  # macOS/Linux
+    .\venv\Scripts\activate   # Windows
+
+    # Reinstall dependencies
+    pip install --upgrade -r requirements.txt
+
+    # Verify Python version
+    python --version  # Should be 3.11+
+    ```
+  </Accordion>
+
+  <Accordion title="Node Module Errors">
+    If you see `Cannot find module` errors:
+    ```bash
+    # Clear npm cache
+    rm -rf node_modules package-lock.json
+    npm install
+
+    # Verify Node version
+    node --version  # Should be 18+
+    ```
+  </Accordion>
+
+  <Accordion title="Electrobun Build Failures">
+    Desktop build issues:
+    ```bash
+    # Ensure Bun is installed
+    bun --version
+
+    # Clean and rebuild
+    cd frontend/src-electrobun
+    rm -rf node_modules
+    bun install
+    bun dev
+    ```
+
+    Platform-specific:
+    - **macOS**: Install Xcode Command Line Tools: `xcode-select --install`
+    - **Linux**: Install build essentials: `sudo apt-get install build-essential`
+    - **Windows**: Install Visual Studio Build Tools
+  </Accordion>
+
+  <Accordion title="Database Connection Issues">
+    Supabase connection problems:
+    - Verify `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY`
+    - Check if your Supabase project is paused (free tier)
+    - Test connection manually:
+      ```python
+      from supabase import create_client
+      client = create_client("your-url", "your-key")
+      print(client.table("todos").select("*").limit(1).execute())
+      ```
+  </Accordion>
+
+  <Accordion title="OAuth Redirect Errors">
+    Google OAuth redirect mismatch:
+    - URIs must **exactly** match (no trailing slashes)
+    - Check both Google Cloud Console and `.env` file
+    - For desktop: Ensure `chronoscalendar://` is registered
+    - Clear browser cookies and try again
+  </Accordion>
+
+  <Accordion title="CSRF Token Errors">
+    If you see 403 CSRF errors:
+    - Check `CSRF_SECRET_KEY` is set and consistent
+    - Verify `CSRF_COOKIE_NAME` matches frontend expectations
+    - Ensure cookies are enabled in browser
+    - The frontend auto-retries with CSRF bootstrap (see `AuthContext.tsx:49-60`)
+  </Accordion>
+</AccordionGroup>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="API Reference" icon="book" href="/api-reference">
+    Explore all available endpoints and their schemas
+  </Card>
+  
+  <Card title="Configuration" icon="gear" href="/configuration">
+    Deep dive into environment variables and settings
+  </Card>
+  
+  <Card title="Architecture" icon="building" href="/architecture">
+    Understand the system design and data flow
+  </Card>
+  
+  <Card title="Deployment" icon="rocket" href="/deployment">
+    Deploy to production with Docker and cloud providers
+  </Card>
+</CardGroup>
+
+<Note>
+  For quick setup without detailed configuration, see the [Quickstart](/quickstart) guide.
+</Note>

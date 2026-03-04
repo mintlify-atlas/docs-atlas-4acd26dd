@@ -1,0 +1,368 @@
+---
+title: Creating Events
+description: Learn how to create, edit, and delete events in Chronos Calendar
+icon: calendar-plus
+---
+
+Chronos Calendar makes it easy to create and manage events across all your Google Calendars with a streamlined, intuitive interface.
+
+## Creating a New Event
+
+There are multiple ways to create events in Chronos Calendar:
+
+### Creating from Calendar View
+
+<Steps>
+  <Step title="Click a Date/Time">
+    Click on any date or time slot in your calendar view. This automatically opens the event creation modal with the selected date and time pre-filled.
+  </Step>
+
+  <Step title="Add Event Details">
+    The event modal opens with focus on the title field. Start typing your event name immediately.
+  </Step>
+
+  <Step title="Configure Time and Details">
+    Adjust the time, add a description, location, and other details as needed (see sections below).
+  </Step>
+
+  <Step title="Create the Event">
+    Click the "Create event" button or press Enter to save the event to your calendar.
+  </Step>
+</Steps>
+
+<Tip>
+  The event modal appears with a smooth animation at the bottom-center of your screen, making it easy to reference the calendar while creating events.
+</Tip>
+
+## Event Modal Interface
+
+The event creation modal provides a clean, organized interface for all event details:
+
+### Title and Description
+
+At the top of the modal:
+- **Title field** - Enter your event name (e.g., "Team Meeting")
+- **Description field** - Add optional details, notes, or agenda items
+- Press Tab to move between fields
+- The title field is automatically focused when the modal opens
+
+<Note>
+  Event titles are required. You'll see a validation error if you try to save an event without a title.
+</Note>
+
+### Time Settings
+
+The time section (marked with a clock icon) allows you to set when your event occurs:
+
+#### Timed Events
+
+<Steps>
+  <Step title="Set Start Time">
+    Use the start time picker to select when your event begins. The time is displayed in 24-hour or 12-hour format based on your system settings.
+  </Step>
+
+  <Step title="Set End Time">
+    Use the end time picker to select when your event ends. Chronos Calendar defaults to a 1-hour duration.
+  </Step>
+
+  <Step title="Select Dates">
+    Use the date pickers below the time inputs to set the start and end dates. Events can span multiple days.
+  </Step>
+</Steps>
+
+#### All-Day Events
+
+<Steps>
+  <Step title="Toggle All-Day Mode">
+    Click the "All day" toggle switch on the right side of the time section.
+  </Step>
+
+  <Step title="Select Date Range">
+    When all-day mode is enabled:
+    - Time pickers are hidden
+    - Only date pickers are shown
+    - The event will last the entire day(s) selected
+  </Step>
+
+  <Step title="Spanning Multiple Days">
+    Select different start and end dates to create multi-day all-day events (e.g., vacations, conferences).
+  </Step>
+</Steps>
+
+<Tip>
+  Press the All-day toggle quickly to convert between timed and all-day events. Your date selections are preserved during the conversion.
+</Tip>
+
+### Location
+
+Add a physical or virtual location to your event:
+- Click the location field (marked with a pin icon)
+- Type any location text:
+  - Physical addresses ("123 Main St, New York, NY")
+  - Room names ("Conference Room B")
+  - Virtual meeting links ("https://zoom.us/j/123456")
+- The location appears in the event details and is synced to Google Calendar
+
+### Guest Management
+
+The guests field allows you to invite attendees:
+- Enter email addresses of people you want to invite
+- Multiple guests can be separated by commas
+- Guests receive calendar invitations via Google Calendar
+- Guest responses sync back from Google Calendar
+
+<Note>
+  Currently, Chronos Calendar displays the guest input field. Full guest management features including seeing responses and managing attendee lists are planned for future updates.
+</Note>
+
+## Event Properties
+
+### Event Colors
+
+Personalize events with colors:
+- Click the colored circle in the bottom-left of the modal
+- Select from available event colors
+- Colors appear as a border on your event in the calendar view
+- Event colors are independent of calendar colors
+
+<Info>
+  Event colors are synced to Google Calendar and will appear in both Chronos Calendar and Google's apps.
+</Info>
+
+### Recurrence
+
+The recurrence section shows "Does not repeat" by default:
+- Recurring events are displayed from Google Calendar
+- Direct creation of recurring events in Chronos is planned for future releases
+- For now, create recurring events in Google Calendar and they'll sync to Chronos
+
+### Availability Status
+
+The "Busy" indicator shows your availability:
+- **Busy** (default) - Marks time as unavailable in your calendar
+- Status affects how others see your availability when scheduling meetings
+- This setting syncs to Google Calendar
+
+<Tip>
+  The availability status is displayed as an orange "Busy" badge in the current version.
+</Tip>
+
+## Editing Events
+
+Edit any event by clicking on it in your calendar view:
+
+<Steps>
+  <Step title="Click the Event">
+    Click on any event in your calendar to open it in the event modal.
+  </Step>
+
+  <Step title="Modify Details">
+    Make changes to any field:
+    - Update the title or description
+    - Change the time or date
+    - Modify the location
+    - Adjust the event color
+    - Toggle all-day mode on or off
+  </Step>
+
+  <Step title="Save Changes">
+    Click "Update event" to save your changes. The button is only enabled when you've made modifications.
+  </Step>
+</Steps>
+
+<Note>
+  The "Update event" button appears grayed out until you make changes. This prevents accidental empty updates.
+</Note>
+
+### Quick Edits
+
+For fast adjustments:
+- Drag events to different dates/times in calendar view (drag-and-drop editing)
+- Resize events by dragging their edges to change duration
+- All changes sync immediately to Google Calendar
+
+## Deleting Events
+
+Remove events you no longer need:
+
+<Steps>
+  <Step title="Open the Event">
+    Click on the event you want to delete to open the event modal.
+  </Step>
+
+  <Step title="Click 'Delete event'">
+    In the bottom-right corner of the modal, click the red "Delete event" button.
+  </Step>
+
+  <Step title="Confirm Deletion">
+    A confirmation prompt appears:
+    - "Delete?" message is displayed
+    - Click "Yes" to confirm deletion
+    - Click "No" to cancel
+  </Step>
+
+  <Step title="Event Removed">
+    The event is immediately deleted from both Chronos Calendar and Google Calendar.
+  </Step>
+</Steps>
+
+<Warning>
+  Deleting an event is permanent and cannot be undone. The event is removed from your Google Calendar as well. If you invited guests, they'll be notified of the cancellation.
+</Warning>
+
+## Keyboard Shortcuts
+
+Speed up event management with keyboard shortcuts:
+
+| Shortcut | Action |
+|----------|--------|
+| `Esc` | Close the event modal |
+| `Enter` | Save the event (when not in textarea) |
+| `Tab` | Move to the next field |
+
+<Tip>
+  When typing in the description textarea, press Enter to create a new line instead of saving the event.
+</Tip>
+
+## Selecting the Right Calendar
+
+When creating a new event, Chronos Calendar automatically selects a calendar:
+
+1. **First visible calendar** - If you have calendars shown in your view, the first visible calendar is selected
+2. **First available calendar** - If no calendars are visible, the first calendar from any account is used
+3. **Primary calendar** - Often defaults to your primary Google Calendar
+
+<Note>
+  In the current version, the calendar selector is automatic. Future updates will allow you to manually choose which calendar to create events in.
+</Note>
+
+## Event Modal Behavior
+
+### Opening the Modal
+
+- Smooth slide-up animation from the bottom
+- Title field is automatically focused
+- Calendar view remains visible in the background
+- Modal appears centered at the bottom of the screen
+
+### Closing the Modal
+
+Multiple ways to close the event modal:
+- Click the X button in the top-right corner
+- Press the Escape key
+- Click outside the modal (on the darkened background)
+- Save or delete the event
+
+<Info>
+  The modal has a gentle slide-down animation when closing, providing smooth visual feedback.
+</Info>
+
+## Best Practices
+
+<CardGroup cols={2}>
+  <Card title="Use Descriptive Titles" icon="heading">
+    Create clear, concise event titles that make sense at a glance. Include key information like meeting topics or event types.
+  </Card>
+  
+  <Card title="Add Locations" icon="location-dot">
+    Always include location information, especially for in-person meetings. Add virtual meeting links for remote events.
+  </Card>
+  
+  <Card title="Set Accurate Times" icon="clock">
+    Double-check start and end times before creating events. Include buffer time for travel or preparation when needed.
+  </Card>
+  
+  <Card title="Use All-Day for Full-Day Events" icon="calendar-day">
+    Use all-day events for holidays, vacations, and deadlines rather than timed events spanning 24 hours.
+  </Card>
+  
+  <Card title="Add Descriptions" icon="note-sticky">
+    Use the description field for agendas, notes, or important details that don't fit in the title.
+  </Card>
+  
+  <Card title="Color Code Events" icon="palette">
+    Use consistent colors for event types (e.g., blue for meetings, green for personal events) to quickly scan your calendar.
+  </Card>
+</CardGroup>
+
+## Troubleshooting
+
+### Event Not Saving
+
+<AccordionGroup>
+  <Accordion title="Missing Title">
+    Events require a title. Make sure you've entered text in the title field before clicking "Create event".
+  </Accordion>
+
+  <Accordion title="Invalid Time Range">
+    Ensure the end time is after the start time. Chronos Calendar validates time ranges before saving.
+  </Accordion>
+
+  <Accordion title="Network Error">
+    Check your internet connection. Events cannot be saved without connectivity to Google Calendar's servers.
+  </Accordion>
+
+  <Accordion title="Calendar Sync Issue">
+    If events aren't saving, check if the target calendar needs reauthorization (look for the ⚠️ icon in the calendar visibility panel).
+  </Accordion>
+</AccordionGroup>
+
+### Event Not Appearing
+
+1. **Check Calendar Visibility** - Ensure the calendar containing the event is visible in the visibility panel
+2. **Verify Date Range** - Make sure you're viewing the correct date range in calendar view
+3. **Check Filters** - Confirm no filters are hiding the event
+4. **Refresh the Page** - Force a sync by refreshing your browser
+
+### Time Zone Issues
+
+All events respect your calendar's time zone settings:
+- Events are created in the calendar's default time zone
+- Times display in your local time zone
+- Time zones are synced from Google Calendar settings
+
+<Warning>
+  If you travel across time zones, be aware that event times may display differently. Check your system time zone settings and Google Calendar time zone preferences.
+</Warning>
+
+## Advanced Features
+
+### Multi-Day Events
+
+Create events spanning multiple days:
+- Set the start date and end date to different days
+- Works for both timed and all-day events
+- Multi-day timed events show the full duration in calendar view
+- Multi-day all-day events appear as a continuous bar across the calendar
+
+### Event Validation
+
+Chronos Calendar validates events before saving:
+- ✅ Title must not be empty
+- ✅ End time must be after start time
+- ✅ Dates must be valid
+- ✅ All-day events must have at least one full day
+
+Validation errors appear inline in the modal, preventing invalid events from being created.
+
+## Coming Soon
+
+Features planned for future releases:
+- Manual calendar selection when creating events
+- Full recurring event creation and editing
+- Complete guest management with response tracking
+- Event reminders and notifications configuration
+- Drag-and-drop event rescheduling
+- Event templates for common meeting types
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Managing Calendars" icon="calendars" href="/guide/managing-calendars">
+    Learn how to organize and control calendar visibility
+  </Card>
+  
+  <Card title="Organizing Todos" icon="list-check" href="/guide/organizing-todos">
+    Manage tasks alongside your calendar events
+  </Card>
+</CardGroup>

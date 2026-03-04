@@ -1,0 +1,398 @@
+---
+title: 'Event Management'
+description: 'View and manage your calendar events with real-time updates and offline support'
+---
+
+## Overview
+
+Chronos Calendar provides a rich event viewing experience with support for all Google Calendar event types, including all-day events, timed events, and recurring events. Events are displayed in multiple views and automatically sync across devices.
+
+## Event Display
+
+### Calendar Views
+
+<CardGroup cols={3}>
+  <Card title="Month View" icon="calendar">
+    See all events for the entire month at a glance
+  </Card>
+  <Card title="Week View" icon="calendar-week">
+    Detailed view of your week with time slots
+  </Card>
+  <Card title="Day View" icon="calendar-day">
+    Hour-by-hour breakdown of your day
+  </Card>
+</CardGroup>
+
+### Event Information
+
+Each event displays:
+
+- **Title**: Event summary/name
+- **Time**: Start and end times (or "All Day")
+- **Calendar**: Color-coded by source calendar
+- **Location**: Physical or virtual location
+- **Description**: Event details and notes
+- **Attendees**: Guest list with RSVP status
+- **Meeting Links**: Video conference links (Google Meet, Zoom, etc.)
+
+<Note>
+  Events are color-coded based on their source calendar, making it easy to distinguish between work, personal, and other calendars.
+</Note>
+
+## Real-Time Event Loading
+
+### IndexedDB Integration
+
+Events are stored locally in IndexedDB for instant access and offline support:
+
+```typescript
+// From useEventsLive.ts:13-21
+export function useEventsLive(calendarIds: string[]): UseEventsLiveResult {
+  const rawEvents = useLiveQuery(
+    async () => {
+      if (!calendarIds.length) return db.events.toArray()
+      return db.events.where('calendarId').anyOf(calendarIds).toArray()
+    },
+    [calendarIds.join(',')],
+    []
+  )
+```
+
+<Info>
+  The `useLiveQuery` hook from Dexie automatically re-renders your calendar when events change in IndexedDB, providing instant UI updates.
+</Info>
+
+### Event Categories
+
+Events are automatically categorized:
+
+<Tabs>
+  <Tab title="Regular Events">
+    Single-occurrence events that don't repeat:
+
+    ```typescript
+    // From useEventsLive.ts:23-39
+    const { events, masters, exceptions } = useMemo(() => {
+      const result = { 
+        events: [] as CalendarEvent[], 
+        masters: [] as CalendarEvent[], 
+        exceptions: [] as CalendarEvent[] 
+      }
+
+      for (const e of rawEvents ?? []) {
+        if (e.status === 'cancelled') continue
+        const converted = dexieToCalendarEvent(e)
+        if (e.recurringEventId) {
+          result.exceptions.push(converted)
+        } else if (e.recurrence?.length) {
+          result.masters.push(converted)
+        } else {
+          result.events.push(converted)
+        }
+      }
+    ```
+  </Tab>
+
+  <Tab title="Master Events">
+    Template events for recurring series that contain:
+    - Recurrence rules (RRULE)
+    - Exception dates (EXDATE)
+    - Additional dates (RDATE)
+
+    Master events are not displayed directly but used to generate recurring instances.
+  </Tab>
+
+  <Tab title="Exception Events">
+    Modified instances of recurring events:
+    - Rescheduled occurrences
+    - Edited event details
+    - Cancelled instances
+
+    Exceptions override the master event for specific dates.
+  </Tab>
+</Tabs>
+
+## Event Data Structure
+
+### Storage Schema
+
+```typescript
+// From db.ts:9-54
+export interface DexieEvent {
+  id?: number;
+  googleEventId: string;
+  calendarId: string;
+  googleAccountId?: string;
+  summary: string;
+  description?: string;
+  location?: string;
+  start: EventDateTime;
+  end: EventDateTime;
+  recurrence?: string[];
+  recurringEventId?: string;
+  originalStartTime?: EventDateTime | null;
+  status: "confirmed" | "tentative" | "cancelled";
+  visibility: "default" | "public" | "private" | "confidential";
+  transparency: "opaque" | "transparent";
+  colorId?: string;
+  color?: string;
+  attendees?: Attendee[];
+  organizer?: {
+    email: string;
+    displayName?: string;
+    self?: boolean;
+  };
+  reminders?: {
+    useDefault: boolean;
+    overrides?: Reminder[];
+  };
+  conferenceData?: {
+    conferenceId?: string;
+    conferenceSolution?: { name: string; iconUri?: string };
+    entryPoints?: {
+      entryPointType: "video" | "phone" | "sip" | "more";
+      uri: string;
+      label?: string;
+    }[];
+  };
+  htmlLink?: string;
+  iCalUID?: string;
+  created?: string;
+  updated?: string;
+}
+```
+
+### Date/Time Handling
+
+Events support both all-day and timed events:
+
+<Tabs>
+  <Tab title="All-Day Events">
+    ```typescript
+    {
+      start: { date: "2024-03-15" },
+      end: { date: "2024-03-16" }
+    }
+    ```
+
+    All-day events use date-only format without time zones.
+  </Tab>
+
+  <Tab title="Timed Events">
+    ```typescript
+    {
+      start: { 
+        dateTime: "2024-03-15T14:00:00Z",
+        timeZone: "America/New_York"
+      },
+      end: { 
+        dateTime: "2024-03-15T15:00:00Z",
+        timeZone: "America/New_York"
+      }
+    }
+    ```
+
+    Timed events include ISO 8601 timestamps with time zones.
+  </Tab>
+</Tabs>
+
+## Event Filtering
+
+### By Calendar
+
+Filter events by selecting/deselecting calendars in the sidebar:
+
+```typescript
+// Events are filtered by calendarIds array
+const { events, masters, exceptions } = useEventsLive(selectedCalendarIds)
+```
+
+When you toggle a calendar on/off, the view instantly updates to show/hide its events.
+
+### By Status
+
+Cancelled events are automatically hidden:
+
+```typescript
+// From useEventsLive.ts:27
+if (e.status === 'cancelled') continue
+```
+
+## Event Encryption
+
+<Info>
+  Event data is encrypted at rest for security. Decryption happens automatically when loading events from the server.
+</Info>
+
+Sensitive fields are encrypted:
+
+- **Title/Summary**: Event names
+- **Description**: Event details
+- **Location**: Event locations
+- **Attendees**: Guest information
+
+```python
+# From calendar.py:88-102
+key = Encryption.derive_key(user_id)
+max_workers = min(8, (os.cpu_count() or 4))
+loop = asyncio.get_running_loop()
+with ThreadPoolExecutor(max_workers=max_workers) as pool:
+    events_task = loop.run_in_executor(pool, lambda: [decrypt_event(e, user_id, key=key) for e in events_raw])
+    masters_task = loop.run_in_executor(pool, lambda: [decrypt_event(m, user_id, key=key) for m in masters_raw])
+    exceptions_task = loop.run_in_executor(pool, lambda: [decrypt_event(e, user_id, key=key) for e in exceptions_raw])
+    events, masters, exceptions = await asyncio.gather(events_task, masters_task, exceptions_task)
+```
+
+Decryption is parallelized for performance when loading many events.
+
+## Offline Support
+
+### Local-First Architecture
+
+Events are always available, even without internet:
+
+1. **Initial Load**: Events fetched from server on first sync
+2. **Local Storage**: Events stored in IndexedDB
+3. **Instant Access**: Calendar loads from local database
+4. **Background Sync**: Server updates happen in background
+
+<Accordion title="How offline mode works">
+  When you open Chronos Calendar:
+
+  1. UI immediately loads events from IndexedDB (instant)
+  2. Background process checks server for updates
+  3. If updates found, they're merged into local database
+  4. UI automatically re-renders with new events
+
+  This provides instant load times while ensuring data freshness.
+</Accordion>
+
+### Sync Priority
+
+The sync system intelligently prioritizes data sources:
+
+```typescript
+// From useCalendarSync.ts:286-293
+const existingLocalCount = await db.events
+  .where("calendarId")
+  .anyOf(ids)
+  .count();
+
+if (existingLocalCount > 0) {
+  setIsLoading(false); // Show local data immediately
+}
+```
+
+If local data exists, it's displayed immediately while syncing in the background.
+
+## Event Queries
+
+### Fetching Events from Server
+
+Events can be fetched from the server at any time:
+
+```python
+# From calendar.py:67-102
+@router.get("/events", response_model=EventsResponse)
+async def list_events(
+    current_user: CurrentUser,
+    supabase: SupabaseClientDep,
+    calendar_ids: str | None = Query(None),
+):
+    user_id = current_user["id"]
+    validated = parse_calendar_ids(calendar_ids, MAX_CALENDARS_PER_SYNC)
+    calendar_id_list = get_user_calendar_ids(supabase, user_id, ",".join(validated) if validated else None)
+
+    if not calendar_id_list:
+        return {"events": [], "masters": [], "exceptions": []}
+
+    events_raw, masters_raw, exceptions_raw = query_events(supabase, calendar_id_list)
+    # ... decryption and return
+```
+
+### Database Indexes
+
+IndexedDB is optimized for fast queries:
+
+```typescript
+// From db.ts:103-107
+this.version(3).stores({
+  events:
+    "++id, [calendarId+googleEventId], calendarId, googleAccountId, recurringEventId, [calendarId+recurringEventId], recurrence",
+  syncMeta: "++id, key",
+});
+```
+
+Compound indexes enable efficient filtering by calendar and event ID.
+
+## Conference Links
+
+Video conference links are automatically detected and displayed:
+
+```typescript
+conferenceData?: {
+  conferenceId?: string;
+  conferenceSolution?: { name: string; iconUri?: string };
+  entryPoints?: {
+    entryPointType: "video" | "phone" | "sip" | "more";
+    uri: string;
+    label?: string;
+  }[];
+}
+```
+
+Supported platforms:
+- Google Meet
+- Zoom
+- Microsoft Teams
+- Any custom video conferencing solution
+
+<Note>
+  Conference links are prominently displayed and can be clicked to join meetings directly.
+</Note>
+
+## Performance Optimization
+
+### Efficient Updates
+
+Events are only updated if they've changed:
+
+```typescript
+// From db.ts:120-138
+export async function upsertEvents(events: DexieEvent[]): Promise<void> {
+  const eventsToWrite = (
+    await Promise.all(
+      events.map(async (event) => {
+        const existing = await db.events
+          .where("[calendarId+googleEventId]")
+          .equals([event.calendarId, event.googleEventId])
+          .first();
+        if (!existing) return event;
+        if (existing.updated && existing.updated >= (event.updated ?? ""))
+          return null; // Skip if not newer
+        return { ...event, id: existing.id };
+      }),
+    )
+  ).filter((e): e is DexieEvent => e !== null);
+```
+
+This prevents unnecessary writes and maintains IndexedDB performance.
+
+### Event Count Tracking
+
+```typescript
+// From useEventsLive.ts:49-59
+export function useEventCount(calendarIds: string[]): number {
+  const count = useLiveQuery(
+    async () => {
+      if (!calendarIds.length) return db.events.count()
+      return db.events.where('calendarId').anyOf(calendarIds).count()
+    },
+    [calendarIds.join(',')],
+    0
+  )
+  return count ?? 0
+}
+```
+
+Efficiently track event counts without loading all event data.

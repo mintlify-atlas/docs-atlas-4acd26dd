@@ -1,0 +1,728 @@
+---
+title: 'Security Architecture'
+description: 'Multi-layered security with encryption, CSRF protection, and secure session management'
+icon: 'shield'
+---
+
+## Security Overview
+
+Chronos Calendar implements **defense-in-depth** security with multiple layers of protection:
+
+<CardGroup cols={2}>
+  <Card title="End-to-End Encryption" icon="lock">
+    AES-256-GCM encryption for sensitive calendar data with per-user key derivation
+  </Card>
+  <Card title="CSRF Protection" icon="shield-check">
+    Double-submit cookie pattern with signed tokens and strict validation
+  </Card>
+  <Card title="Secure Sessions" icon="key">
+    HTTP-only, Secure, SameSite cookies with __Host- prefix in production
+  </Card>
+  <Card title="Request Validation" icon="filter">
+    Origin validation, Fetch Metadata Policy, and rate limiting
+  </Card>
+</CardGroup>
+
+## Threat Model
+
+Chronos Calendar protects against:
+
+- **Cross-Site Request Forgery (CSRF)**: Unauthorized actions from malicious sites
+- **Cross-Site Scripting (XSS)**: Injection of malicious scripts
+- **Data Breach**: Unauthorized access to calendar data in database
+- **Man-in-the-Middle (MITM)**: Interception of credentials or tokens
+- **Session Hijacking**: Stolen session cookies
+- **Brute Force Attacks**: Credential stuffing and password guessing
+- **Cross-Origin Attacks**: Malicious requests from untrusted domains
+
+## Encryption Layer
+
+### AES-256-GCM with HKDF
+
+Sensitive calendar fields (title, description, location, attendees) are encrypted using **AES-256-GCM** (Authenticated Encryption with Associated Data).
+
+#### Why AES-GCM?
+
+<Info>
+  AES-GCM provides both **confidentiality** (data cannot be read) and **authenticity** (data cannot be tampered with) in a single operation. It's the gold standard for symmetric encryption.
+</Info>
+
+### Encryption Implementation
+
+```python
+from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+from cryptography.hazmat.primitives.kdf.hkdf import HKDF
+from cryptography.hazmat.primitives import hashes
+import os
+import base64
+
+class Encryption:
+    IV_LENGTH = 12              # 96-bit nonce for GCM
+    KEY_LENGTH = 32             # 256-bit key
+    AAD_PREFIX = b"chronos-v1:" # Additional authenticated data
+    HKDF_SALT = b"chronos-hkdf-v1!"
+    
+    @staticmethod
+    def _derive_key(user_id: str) -> bytes:
+        """Derive per-user encryption key from master key using HKDF."""
+        settings = get_settings()
+        hkdf = HKDF(
+            algorithm=hashes.SHA256(),
+            length=Encryption.KEY_LENGTH,
+            salt=Encryption.HKDF_SALT,
+            info=user_id.encode(),  # User ID as context
+        )
+        return hkdf.derive(settings.ENCRYPTION_MASTER_KEY.encode())
+    
+    @staticmethod
+    def encrypt(plaintext: str, user_id: str, key: bytes | None = None) -> str:
+        """Encrypt plaintext with AES-256-GCM."""
+        if key is None:
+            key = Encryption._derive_key(user_id)
+        
+        # Generate random IV (nonce)
+        iv = os.urandom(Encryption.IV_LENGTH)
+        
+        # Build Additional Authenticated Data (AAD)
+        aad = Encryption.AAD_PREFIX + user_id.encode()
+        
+        # Encrypt
+        aesgcm = AESGCM(key)
+        ciphertext = aesgcm.encrypt(iv, plaintext.encode(), aad)
+        
+        # Return base64-encoded IV + ciphertext
+        return base64.b64encode(iv + ciphertext).decode()
+    
+    @staticmethod
+    def decrypt(encrypted_data: str, user_id: str, key: bytes | None = None) -> str:
+        """Decrypt ciphertext with AES-256-GCM."""
+        try:
+            if key is None:
+                key = Encryption._derive_key(user_id)
+            
+            # Decode base64
+            combined = base64.b64decode(encrypted_data)
+            
+            # Split IV and ciphertext
+            iv = combined[:Encryption.IV_LENGTH]
+            ciphertext = combined[Encryption.IV_LENGTH:]
+            
+            # Build AAD
+            aad = Encryption.AAD_PREFIX + user_id.encode()
+            
+            # Decrypt and verify authentication tag
+            aesgcm = AESGCM(key)
+            plaintext = aesgcm.decrypt(iv, ciphertext, aad)
+            
+            return plaintext.decode()
+        except (binascii.Error, InvalidTag, UnicodeDecodeError, IndexError) as e:
+            logger.debug("Decryption failed: %s", type(e).__name__)
+            raise ValueError("Decryption failed")
+```
+
+**Location**: `backend/app/core/encryption.py:16`
+
+### Key Derivation with HKDF
+
+**HKDF** (HMAC-based Key Derivation Function) derives per-user keys from a single master key:
+
+```
+User Key = HKDF-SHA256(
+    master_key,
+    salt="chronos-hkdf-v1!",
+    info=user_id,
+    length=32 bytes
+)
+```
+
+**Benefits**:
+- **Single master key** to manage, not per-user keys
+- **Cryptographically isolated** keys per user
+- **Key rotation** possible by re-deriving with new master key
+
+<Note>
+  The `user_id` is used as the HKDF `info` parameter, ensuring each user has a unique derived key even if the master key is compromised for one user.
+</Note>
+
+### Batch Encryption
+
+For performance, multiple fields are encrypted in one pass:
+
+```python
+@staticmethod
+def batch_encrypt(fields: dict[str, str | None], user_id: str) -> dict[str, str | None]:
+    """Encrypt multiple fields with one key derivation."""
+    key = Encryption._derive_key(user_id)  # Derive once
+    return {
+        k: Encryption.encrypt(v, user_id, key=key) if v is not None else None
+        for k, v in fields.items()
+    }
+
+@staticmethod
+def batch_decrypt(fields: dict[str, str | None], user_id: str) -> dict[str, str | None]:
+    """Decrypt multiple fields with one key derivation."""
+    key = Encryption._derive_key(user_id)  # Derive once
+    return {
+        k: Encryption.decrypt(v, user_id, key=key) if v is not None else None
+        for k, v in fields.items()
+    }
+```
+
+**Location**: `backend/app/core/encryption.py:68`
+
+### What Gets Encrypted?
+
+<Tabs>
+  <Tab title="Calendar Events">
+    - `summary` (event title)
+    - `description` (event body)
+    - `location` (event location)
+    - `attendees` (list of attendees, serialized as JSON)
+  </Tab>
+  <Tab title="Not Encrypted">
+    - `start` and `end` times (needed for queries)
+    - `status` (confirmed/tentative/cancelled)
+    - `visibility` (public/private)
+    - `recurrence` rules (needed for rendering)
+    - `google_event_id` (foreign key)
+    - `user_id` (foreign key)
+  </Tab>
+</Tabs>
+
+<Info>
+  Fields required for querying (e.g., date ranges) are not encrypted to maintain performance. Sensitive free-text fields are encrypted.
+</Info>
+
+## CSRF Protection
+
+### Double-Submit Cookie Pattern
+
+Chronos implements the **double-submit cookie** pattern with **signed tokens**:
+
+1. Server generates a signed CSRF token
+2. Token is set in a cookie (readable by JavaScript)
+3. Client reads cookie and sends token in `X-CSRF-Token` header
+4. Server validates that cookie and header match, and signature is valid
+
+### CSRF Token Structure
+
+```python
+import hmac
+import json
+import base64
+import secrets
+import time
+
+def create_csrf_token(*, secret: str, ttl_seconds: int, now_ts: int | None = None) -> str:
+    """Create signed CSRF token with expiration."""
+    now = now_ts if now_ts is not None else int(time.time())
+    
+    # Payload: random nonce + expiration
+    payload = json.dumps({
+        "n": secrets.token_hex(16),  # Random nonce
+        "exp": now + ttl_seconds,    # Expiration timestamp
+    }, separators=(",", ":")).encode("utf-8")
+    
+    # Base64-encode payload
+    payload_b64 = base64.urlsafe_b64encode(payload).decode("ascii").rstrip("=")
+    
+    # Sign payload with HMAC-SHA256
+    sig = hmac.new(
+        key=secret.encode("utf-8"),
+        msg=payload_b64.encode("ascii"),
+        digestmod="sha256",
+    ).digest()
+    sig_b64 = base64.urlsafe_b64encode(sig).decode("ascii").rstrip("=")
+    
+    # Token format: <payload>.<signature>
+    return f"{payload_b64}.{sig_b64}"
+```
+
+**Location**: `backend/app/core/csrf.py:14`
+
+### Token Validation
+
+```python
+def validate_csrf_token(*, token: str, secret: str, now_ts: int | None = None) -> bool:
+    """Validate CSRF token signature and expiration."""
+    if not token:
+        return False
+    
+    parts = token.split(".")
+    if len(parts) != 2:
+        return False
+    
+    payload_b64, sig_b64 = parts
+    if not payload_b64 or not sig_b64:
+        return False
+    
+    # Verify signature
+    expected_sig = hmac.new(
+        key=secret.encode("utf-8"),
+        msg=payload_b64.encode("ascii"),
+        digestmod="sha256",
+    ).digest()
+    expected_sig_b64 = base64.urlsafe_b64encode(expected_sig).decode("ascii").rstrip("=")
+    
+    if not hmac.compare_digest(sig_b64, expected_sig_b64):
+        return False
+    
+    # Decode and check expiration
+    try:
+        pad = "=" * ((4 - len(payload_b64) % 4) % 4)
+        payload_json = base64.urlsafe_b64decode(payload_b64 + pad).decode("utf-8")
+        payload = json.loads(payload_json)
+        exp = int(payload.get("exp"))
+    except (ValueError, TypeError, json.JSONDecodeError):
+        return False
+    
+    now = now_ts if now_ts is not None else int(time.time())
+    return exp >= now
+```
+
+**Location**: `backend/app/core/csrf.py:45`
+
+### CSRF Middleware
+
+```python
+class CSRFMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next: RequestResponseEndpoint) -> Response:
+        # Only check mutating requests
+        if request.method in {"POST", "PUT", "PATCH", "DELETE"}:
+            # Only check authenticated requests
+            if _has_auth_cookie(request):
+                cookie_token = get_csrf_cookie_token(request)
+                request_token = get_csrf_request_token(request)
+                
+                # Tokens must match
+                if not cookie_token or not request_token or not hmac.compare_digest(cookie_token, request_token):
+                    return JSONResponse(status_code=403, content={"detail": "Invalid CSRF token"})
+                
+                # Validate signature and expiration
+                if not validate_csrf_token(token=request_token, secret=settings.CSRF_SECRET_KEY):
+                    logger.warning("security.reject csrf_invalid path=%s method=%s", path, request.method)
+                    return JSONResponse(status_code=403, content={"detail": "Invalid CSRF token"})
+        
+        return await call_next(request)
+```
+
+**Location**: `backend/app/core/security.py:74`
+
+### CSRF Exemptions
+
+Certain endpoints are **exempt** from CSRF validation:
+
+- `/calendar/webhook` - Google Calendar webhooks (validated by signature instead)
+- `/auth/web/callback` - OAuth callback (uses `state` parameter for CSRF protection)
+
+**Location**: `backend/app/core/security.py:23`
+
+<Note>
+  Webhooks use Google's signature validation instead of CSRF tokens. OAuth callbacks use the `state` parameter as CSRF protection per OAuth 2.0 spec.
+</Note>
+
+## Session Management
+
+### Secure Cookie Configuration
+
+```python
+class Settings(BaseSettings):
+    SESSION_COOKIE_NAME: str = "__Host-chronos-session"  # __Host- prefix enforces Secure
+    REFRESH_COOKIE_NAME: str = "__Host-chronos-refresh"
+    COOKIE_MAX_AGE: int = 3600              # 1 hour for access token
+    COOKIE_SECURE: bool = True              # HTTPS only
+    COOKIE_SAMESITE: Literal["lax", "strict", "none"] = "lax"
+    COOKIE_DOMAIN: str | None = None        # Must be None for __Host- prefix
+```
+
+**Location**: `backend/app/config.py:35`
+
+### Cookie Flags
+
+```python
+def set_cookie(
+    response: Response,
+    key: str,
+    value: str,
+    max_age: int,
+    httponly: bool = True,
+):
+    """Set secure cookie with all protective flags."""
+    settings = get_settings()
+    response.set_cookie(
+        key=key,
+        value=value,
+        max_age=max_age,
+        httponly=httponly,          # Not accessible to JavaScript
+        secure=settings.COOKIE_SECURE,  # HTTPS only
+        samesite=settings.COOKIE_SAMESITE,  # CSRF protection
+        domain=settings.COOKIE_DOMAIN,      # None for __Host- prefix
+        path="/",
+    )
+```
+
+<CardGroup cols={3}>
+  <Card title="HttpOnly" icon="eye-slash">
+    Prevents JavaScript from reading the cookie, protecting against XSS
+  </Card>
+  <Card title="Secure" icon="lock">
+    Cookie only sent over HTTPS, preventing MITM attacks
+  </Card>
+  <Card title="SameSite" icon="shield">
+    Cookie not sent on cross-origin requests, mitigating CSRF
+  </Card>
+</CardGroup>
+
+### __Host- Prefix
+
+Cookies with the `__Host-` prefix have **additional browser-enforced security**:
+
+- Must have `Secure` flag
+- Must have `Path=/`
+- Must NOT have `Domain` attribute (restricted to current domain)
+
+<Info>
+  The `__Host-` prefix prevents subdomain attacks and ensures cookies are bound to the exact origin.
+</Info>
+
+### Token Refresh Flow
+
+```python
+@router.post("/refresh")
+async def refresh_session(request: Request, response: Response):
+    """Refresh access token using refresh token."""
+    refresh_token = request.cookies.get(settings.REFRESH_COOKIE_NAME)
+    if not refresh_token:
+        raise HTTPException(status_code=401, detail="No refresh token")
+    
+    # Exchange refresh token for new access token
+    supabase = get_supabase_client()
+    auth_response = supabase.auth.refresh_session(refresh_token)
+    
+    if not auth_response.session:
+        raise HTTPException(status_code=401, detail="Invalid refresh token")
+    
+    # Set new access token cookie
+    set_cookie(
+        response=response,
+        key=settings.SESSION_COOKIE_NAME,
+        value=auth_response.session.access_token,
+        max_age=settings.COOKIE_MAX_AGE,
+    )
+    
+    # Optionally rotate refresh token
+    if auth_response.session.refresh_token:
+        set_cookie(
+            response=response,
+            key=settings.REFRESH_COOKIE_NAME,
+            value=auth_response.session.refresh_token,
+            max_age=settings.COOKIE_MAX_AGE * 24 * 7,  # 7 days
+        )
+    
+    return {"message": "Session refreshed"}
+```
+
+## Origin and Request Validation
+
+### Origin Validation Middleware
+
+```python
+class OriginValidationMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next: RequestResponseEndpoint) -> Response:
+        # Only check mutating requests
+        if request.method in {"POST", "PUT", "PATCH", "DELETE"}:
+            origin = request.headers.get("origin")
+            
+            # Validate origin against allowlist
+            if origin and origin not in settings.cors_origins:
+                logger.warning(
+                    "security.reject invalid_origin origin=%s path=%s",
+                    origin, request.url.path
+                )
+                return JSONResponse(status_code=403, content={"detail": "Invalid origin"})
+        
+        return await call_next(request)
+```
+
+**Location**: `backend/app/core/security.py:50`
+
+### Fetch Metadata Policy
+
+**Fetch Metadata Request Headers** provide additional context about request origins:
+
+```python
+class FetchMetadataMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next: RequestResponseEndpoint) -> Response:
+        if request.method in {"POST", "PUT", "PATCH", "DELETE"}:
+            if _has_auth_cookie(request):
+                sec_fetch_site = request.headers.get("sec-fetch-site")
+                
+                # Only allow same-origin, same-site, or direct (none) requests
+                if sec_fetch_site and sec_fetch_site not in {"same-origin", "same-site", "none"}:
+                    logger.warning(
+                        "security.reject fetch_metadata path=%s method=%s sec_fetch_site=%s",
+                        path, request.method, sec_fetch_site
+                    )
+                    return JSONResponse(status_code=403, content={"detail": "Blocked by Fetch Metadata policy"})
+        
+        return await call_next(request)
+```
+
+**Location**: `backend/app/core/security.py:102`
+
+<Info>
+  Fetch Metadata headers (`Sec-Fetch-Site`, `Sec-Fetch-Mode`, etc.) are automatically sent by modern browsers and cannot be forged by JavaScript, providing strong cross-site request detection.
+</Info>
+
+## Rate Limiting
+
+### SlowAPI Configuration
+
+```python
+from slowapi import Limiter
+from slowapi.util import get_remote_address
+
+limiter = Limiter(key_func=get_remote_address)
+
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+```
+
+### Endpoint Limits
+
+```python
+# Authentication endpoints: 5 requests per minute per IP
+@router.post("/web/login")
+@limiter.limit(settings.RATE_LIMIT_AUTH)  # "5/minute"
+async def web_login(request: Request):
+    pass
+
+# API endpoints: 100 requests per minute per user
+@router.get("/events")
+@limiter.limit(settings.RATE_LIMIT_API)  # "100/minute"
+async def get_events(request: Request):
+    pass
+```
+
+<Note>
+  Rate limits are configurable via environment variables, allowing different limits for development and production.
+</Note>
+
+## Security Headers
+
+### Headers Applied to All Responses
+
+```python
+response.headers["X-Content-Type-Options"] = "nosniff"
+response.headers["X-Frame-Options"] = "DENY"
+response.headers["X-XSS-Protection"] = "1; mode=block"
+response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+response.headers["Permissions-Policy"] = "geolocation=(), microphone=(), camera=()"
+
+if settings.ENVIRONMENT == "production":
+    response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+```
+
+**Location**: `backend/app/core/security.py:150`
+
+### Content Security Policy
+
+In production, a strict CSP is enforced:
+
+```python
+response.headers["Content-Security-Policy"] = (
+    "default-src 'self'; "
+    f"script-src 'self' 'nonce-{csp_nonce}' https://apis.google.com; "
+    f"style-src 'self' 'nonce-{csp_nonce}' https://fonts.googleapis.com; "
+    "font-src 'self' https://fonts.gstatic.com; "
+    "img-src 'self' data: https:; "
+    "connect-src 'self' https://*.supabase.co https://apis.google.com https://accounts.google.com; "
+    "frame-src https://accounts.google.com; "
+    "object-src 'none'; "
+    "base-uri 'self';"
+)
+```
+
+**Location**: `backend/app/core/security.py:162`
+
+<CardGroup cols={2}>
+  <Card title="Nonce-based CSP" icon="hashtag">
+    Each response gets a unique nonce for inline scripts/styles, preventing XSS
+  </Card>
+  <Card title="Allowlisted Domains" icon="list-check">
+    Only trusted domains (Google, Supabase) allowed for external resources
+  </Card>
+</CardGroup>
+
+## Production Security Checklist
+
+<Tabs>
+  <Tab title="Environment Variables">
+    - [ ] `COOKIE_SECURE=true`
+    - [ ] `COOKIE_SAMESITE=lax` or `strict`
+    - [ ] `ENVIRONMENT=production`
+    - [ ] `ENCRYPTION_MASTER_KEY` is cryptographically random (32+ bytes)
+    - [ ] `CSRF_SECRET_KEY` is unique and random
+    - [ ] `CORS_ORIGINS` contains only production domains
+  </Tab>
+  <Tab title="Infrastructure">
+    - [ ] HTTPS enforced (valid TLS certificate)
+    - [ ] Database uses SSL/TLS connections
+    - [ ] Secrets stored in secure vault (not in code)
+    - [ ] API keys rotated regularly
+    - [ ] Monitoring and alerting configured
+    - [ ] Rate limits tuned for production traffic
+  </Tab>
+  <Tab title="Code">
+    - [ ] All user input validated and sanitized
+    - [ ] SQL queries use parameterized queries (Supabase handles this)
+    - [ ] Sensitive fields encrypted in database
+    - [ ] Error messages don't leak sensitive info
+    - [ ] Dependencies updated and audited
+  </Tab>
+</Tabs>
+
+## Security Auditing
+
+### Request Logging
+
+All requests are logged with:
+
+- Request ID (UUID)
+- HTTP method and path
+- Status code
+- Duration
+- Source IP (for rate limiting)
+
+```python
+logger.info(
+    "%s %s %s %.0fms",
+    request.method,
+    request.url.path,
+    response.status_code,
+    duration_ms,
+)
+```
+
+**Location**: `backend/app/core/security.py:143`
+
+### Security Event Logging
+
+Security rejections are logged at WARNING level:
+
+```python
+logger.warning(
+    "security.reject csrf_invalid path=%s method=%s",
+    path, request.method
+)
+
+logger.warning(
+    "security.reject invalid_origin origin=%s path=%s",
+    origin, request.url.path
+)
+
+logger.warning(
+    "security.reject fetch_metadata path=%s method=%s sec_fetch_site=%s",
+    path, request.method, sec_fetch_site
+)
+```
+
+These logs can be ingested by security monitoring tools to detect attacks.
+
+## Common Attack Scenarios
+
+<Tabs>
+  <Tab title="CSRF Attack">
+    **Scenario**: Attacker tricks user into submitting a form to Chronos from a malicious site.
+
+    **Defenses**:
+    1. **CSRF tokens**: Request without valid token is rejected
+    2. **Origin validation**: Request from untrusted origin is rejected
+    3. **Fetch Metadata**: `Sec-Fetch-Site: cross-site` triggers rejection
+    4. **SameSite cookies**: Browser doesn't send session cookie on cross-site request
+  </Tab>
+  <Tab title="XSS Attack">
+    **Scenario**: Attacker injects malicious script into event description.
+
+    **Defenses**:
+    1. **Content Security Policy**: Inline scripts without nonce are blocked
+    2. **X-XSS-Protection header**: Browser XSS filter enabled
+    3. **Input sanitization**: Frontend sanitizes user input before rendering
+    4. **HttpOnly cookies**: JavaScript cannot read session cookies
+  </Tab>
+  <Tab title="Data Breach">
+    **Scenario**: Attacker gains access to database backup or SQL injection.
+
+    **Defenses**:
+    1. **Encryption at rest**: Sensitive fields are encrypted with AES-256-GCM
+    2. **Per-user keys**: Compromising one user's data doesn't affect others
+    3. **Parameterized queries**: Supabase prevents SQL injection
+    4. **Row-level security**: Supabase RLS policies enforce access control
+  </Tab>
+  <Tab title="Session Hijacking">
+    **Scenario**: Attacker steals session cookie via network sniffing or XSS.
+
+    **Defenses**:
+    1. **HTTPS only**: `Secure` flag prevents transmission over HTTP
+    2. **HttpOnly flag**: JavaScript cannot read cookie
+    3. **__Host- prefix**: Cookie bound to exact domain
+    4. **Short expiration**: Access tokens expire after 1 hour
+    5. **Token refresh**: Refresh token required for new access token
+  </Tab>
+</Tabs>
+
+## Security Best Practices for Developers
+
+<CardGroup cols={2}>
+  <Card title="Never Log Secrets" icon="file-slash">
+    Don't log access tokens, encryption keys, or passwords. Use `[REDACTED]` in logs.
+  </Card>
+  <Card title="Validate All Input" icon="filter-circle-xmark">
+    Use Pydantic models for request validation. Never trust client data.
+  </Card>
+  <Card title="Use Parameterized Queries" icon="database">
+    Always use Supabase client methods, never string concatenation for SQL.
+  </Card>
+  <Card title="Rotate Keys Regularly" icon="key">
+    Rotate `ENCRYPTION_MASTER_KEY` and `CSRF_SECRET_KEY` at least annually.
+  </Card>
+  <Card title="Audit Dependencies" icon="shield-virus">
+    Run `pip audit` regularly to check for vulnerable dependencies.
+  </Card>
+  <Card title="Test Security Controls" icon="vial">
+    Write tests for CSRF protection, encryption, and authentication flows.
+  </Card>
+</CardGroup>
+
+## Future Security Enhancements
+
+<Note>
+  Potential security improvements for future releases:
+  - **WebAuthn/Passkeys** for passwordless authentication
+  - **Certificate pinning** for Google API requests
+  - **Audit log** for all data access and modifications
+  - **IP allowlisting** for admin endpoints
+  - **Anomaly detection** for unusual access patterns
+  - **Encrypted backups** with separate encryption keys
+</Note>
+
+## Resources and References
+
+- [OWASP Top 10](https://owasp.org/www-project-top-ten/)
+- [OWASP CSRF Prevention Cheat Sheet](https://cheatsheetseries.owasp.org/cheatsheets/Cross-Site_Request_Forgery_Prevention_Cheat_Sheet.html)
+- [MDN: Set-Cookie](https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Set-Cookie)
+- [MDN: Content Security Policy](https://developer.mozilla.org/en-US/docs/Web/HTTP/CSP)
+- [Fetch Metadata Request Headers](https://www.w3.org/TR/fetch-metadata/)
+- [NIST: HKDF](https://datatracker.ietf.org/doc/html/rfc5869)
+- [AES-GCM](https://en.wikipedia.org/wiki/Galois/Counter_Mode)
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Architecture Overview" icon="sitemap" href="/architecture/overview">
+    Return to the high-level architecture overview
+  </Card>
+  <Card title="Backend Architecture" icon="server" href="/architecture/backend">
+    Learn how security integrates with the FastAPI backend
+  </Card>
+</CardGroup>

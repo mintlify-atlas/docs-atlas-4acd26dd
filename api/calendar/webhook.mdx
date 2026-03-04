@@ -1,0 +1,195 @@
+---
+title: "Webhook"
+api: "POST /calendar/webhook"
+description: "Receive real-time calendar change notifications from Google Calendar"
+---
+
+## Endpoint
+
+```
+POST /calendar/webhook
+```
+
+Receives push notifications from Google Calendar when calendar events change. This endpoint is called by Google's push notification service and validates the request using channel ID and security tokens.
+
+<Note>
+This endpoint is designed to be called by Google Calendar's push notification service, not by client applications directly.
+</Note>
+
+## Authentication
+
+Google Calendar push notifications include custom headers for validation:
+
+- **X-Goog-Channel-Id**: Unique channel identifier
+- **X-Goog-Channel-Token**: Secret token for verification
+- **X-Goog-Resource-State**: State of the resource (sync, exists, not_exists)
+
+## Headers
+
+<ParamField header="X-Goog-Channel-Id" type="string" required>
+  Channel ID registered during sync. Used to identify which calendar the notification is for.
+</ParamField>
+
+<ParamField header="X-Goog-Channel-Token" type="string" required>
+  Security token that must match the token stored in the database. Verified using HMAC to prevent timing attacks.
+</ParamField>
+
+<ParamField header="X-Goog-Resource-State" type="string" required>
+  State of the resource:
+  - `sync` - Initial verification message (ignored)
+  - `exists` - Resource has been created or updated
+  - `not_exists` - Resource has been deleted
+</ParamField>
+
+<ParamField header="X-Goog-Resource-Id" type="string">
+  Opaque ID for the watched resource
+</ParamField>
+
+<ParamField header="X-Goog-Channel-Expiration" type="string">
+  RFC 3339 timestamp when the notification channel expires
+</ParamField>
+
+## Request Flow
+
+1. Google sends POST request with notification headers
+2. Endpoint validates `X-Goog-Channel-Id` header exists
+3. Looks up sync state from database using channel ID
+4. Verifies `X-Goog-Channel-Token` matches stored token (HMAC comparison)
+5. Ignores `sync` resource state (verification message)
+6. Extracts calendar ID and user ID from sync state
+7. Triggers background sync for the affected calendar
+
+## Response
+
+<ResponseField name="Empty Object" type="object" required>
+  Returns an empty JSON object `{}` on success
+</ResponseField>
+
+## Security Validation
+
+### Channel ID Validation
+
+The channel ID must exist in the `calendar_sync_state` table and be associated with a valid calendar and user.
+
+### Token Verification
+
+```python
+hmac.compare_digest(actual_token, expected_token)
+```
+
+Uses constant-time comparison to prevent timing attacks.
+
+## Example Request from Google
+
+```http
+POST /calendar/webhook HTTP/1.1
+Host: api.chronoscalendar.com
+X-Goog-Channel-Id: 550e8400-e29b-41d4-a716-446655440000
+X-Goog-Channel-Token: a8f5f167f44f4964e6c998dee827110c
+X-Goog-Resource-State: exists
+X-Goog-Resource-Id: ret08u3rv24htgh004g
+X-Goog-Channel-Expiration: Thu, 11 Mar 2026 19:00:00 GMT
+Content-Length: 0
+```
+
+## Example Response
+
+```json
+{}
+```
+
+## Error Responses
+
+<ResponseField name="400 Bad Request">
+  Missing `X-Goog-Channel-Id` header
+  
+  ```json
+  {"detail": "Missing channel ID"}
+  ```
+</ResponseField>
+
+<ResponseField name="401 Unauthorized">
+  Invalid or mismatched `X-Goog-Channel-Token`
+  
+  ```json
+  {"detail": "Invalid token"}
+  ```
+</ResponseField>
+
+<ResponseField name="404 Not Found">
+  Channel ID not found in database (returns empty object `{}` to avoid leaking information to Google)
+</ResponseField>
+
+## Webhook Channel Registration
+
+Webhook channels are automatically registered during the [Sync Events](/api/calendar/sync-events) operation when `WEBHOOK_BASE_URL` is configured.
+
+### Channel Lifecycle
+
+- **Creation**: Registered after successful calendar sync
+- **Expiration**: Channels expire based on Google's policy
+- **Renewal**: Automatically renewed if expiring within buffer period (configured hours)
+- **Buffer**: Channels are renewed before expiration to prevent gaps
+
+## Background Sync Trigger
+
+When a valid webhook is received (non-sync state), the endpoint calls:
+
+```python
+handle_webhook_notification(calendar_id, user_id)
+```
+
+This triggers an asynchronous background sync for the affected calendar, ensuring the local database stays up-to-date with Google Calendar changes.
+
+## Resource States
+
+<ResponseField name="sync" type="state">
+  Initial verification message sent by Google when channel is created. The endpoint ignores this and returns immediately.
+</ResponseField>
+
+<ResponseField name="exists" type="state">
+  A resource (event) has been created or updated. Triggers background sync.
+</ResponseField>
+
+<ResponseField name="not_exists" type="state">
+  A resource (event) has been deleted. Triggers background sync to update local state.
+</ResponseField>
+
+## Database Schema
+
+The webhook uses the `calendar_sync_state` table which stores:
+
+- `google_calendar_id` - Calendar identifier
+- `webhook_channel_id` - Unique channel ID (UUID)
+- `webhook_resource_id` - Google's opaque resource ID
+- `webhook_expires_at` - Channel expiration timestamp
+- `webhook_channel_token` - Secret verification token
+
+## Configuration
+
+<ParamField path="WEBHOOK_BASE_URL" type="string">
+  Base URL for webhook endpoint. Must be publicly accessible HTTPS URL.
+  
+  Example: `https://api.chronoscalendar.com`
+  
+  If not configured, webhook registration is skipped.
+</ParamField>
+
+<ParamField path="WEBHOOK_CHANNEL_BUFFER_HOURS" type="number">
+  Hours before expiration to renew webhook channel. Prevents gaps in notifications.
+  
+  Default: 24 hours
+</ParamField>
+
+## Related Endpoints
+
+- [Sync Events](/api/calendar/sync-events) - Registers webhook channels
+- [Get Events](/api/calendar/get-events) - Retrieve synced events
+
+## Source Code Reference
+
+See implementation in:
+- `backend/app/routers/calendar.py:226-253` (webhook endpoint)
+- `backend/app/calendar/sync.py:163-217` (webhook registration)
+- `backend/app/calendar/webhook.py` (notification handler)
+- `backend/app/calendar/db.py:31-53` (webhook persistence)

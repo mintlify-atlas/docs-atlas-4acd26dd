@@ -1,0 +1,340 @@
+---
+title: 'Todo Lists'
+description: 'Manage todo lists with create, read, update, and delete operations'
+---
+
+## Overview
+
+Todo lists are containers for organizing todo items. Each list has a name, color, and order. System lists cannot be deleted.
+
+**Base URL**: `/todos/todo-lists`
+
+**Authentication**: All endpoints require authentication via Bearer token.
+
+**Encryption**: The `name` field is encrypted at rest using AES-GCM with user-specific keys. System lists skip encryption for the name field.
+
+---
+
+## List Todo Lists
+
+<Card title="GET /todos/todo-lists" icon="list">
+  Retrieve all todo lists for the authenticated user
+</Card>
+
+### Response
+
+Returns an array of todo list objects ordered by the `order` field.
+
+<ResponseField name="id" type="string" required>
+  Unique identifier for the list (UUID)
+</ResponseField>
+
+<ResponseField name="userId" type="string" required>
+  User ID that owns this list
+</ResponseField>
+
+<ResponseField name="name" type="string" required>
+  List name (decrypted from storage)
+</ResponseField>
+
+<ResponseField name="color" type="string" required>
+  Hex color code (e.g., `#FF5733`)
+</ResponseField>
+
+<ResponseField name="isSystem" type="boolean" required>
+  Whether this is a system-generated list (cannot be deleted)
+</ResponseField>
+
+<ResponseField name="order" type="integer" required>
+  Sort order for displaying lists
+</ResponseField>
+
+### Example Request
+
+```bash
+curl -X GET https://api.chronoscalendar.com/todos/todo-lists \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+### Example Response
+
+```json
+[
+  {
+    "id": "123e4567-e89b-12d3-a456-426614174000",
+    "userId": "user_123",
+    "name": "Work Tasks",
+    "color": "#3B82F6",
+    "isSystem": false,
+    "order": 0
+  },
+  {
+    "id": "987fcdeb-51a2-43f1-b123-456789abcdef",
+    "userId": "user_123",
+    "name": "Personal",
+    "color": "#10B981",
+    "isSystem": true,
+    "order": 1
+  }
+]
+```
+
+---
+
+## Create Todo List
+
+<Card title="POST /todos/todo-lists" icon="plus">
+  Create a new todo list
+</Card>
+
+### Request Body
+
+<ParamField body="name" type="string" required>
+  List name (max 100 characters, will be encrypted)
+</ParamField>
+
+<ParamField body="color" type="string" required>
+  Hex color code matching pattern `^#[0-9a-fA-F]{6}$`
+</ParamField>
+
+### Response
+
+Returns the created todo list object.
+
+<ResponseField name="id" type="string" required>
+  Unique identifier for the created list
+</ResponseField>
+
+<ResponseField name="userId" type="string" required>
+  User ID that owns this list
+</ResponseField>
+
+<ResponseField name="name" type="string" required>
+  List name (decrypted)
+</ResponseField>
+
+<ResponseField name="color" type="string" required>
+  Hex color code
+</ResponseField>
+
+<ResponseField name="isSystem" type="boolean" required>
+  Always `false` for user-created lists
+</ResponseField>
+
+<ResponseField name="order" type="integer" required>
+  Automatically assigned order (minimum existing order - 1)
+</ResponseField>
+
+### Example Request
+
+```bash
+curl -X POST https://api.chronoscalendar.com/todos/todo-lists \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "Shopping List",
+    "color": "#F59E0B"
+  }'
+```
+
+### Example Response
+
+```json
+{
+  "id": "456e7890-e12b-34d5-a678-901234567890",
+  "userId": "user_123",
+  "name": "Shopping List",
+  "color": "#F59E0B",
+  "isSystem": false,
+  "order": -1
+}
+```
+
+### Error Responses
+
+<Expandable title="400 Bad Request">
+  - Invalid color format (must be hex code)
+  - Name exceeds 100 characters
+</Expandable>
+
+<Expandable title="500 Internal Server Error">
+  - Failed to create list in database
+</Expandable>
+
+---
+
+## Update Todo List
+
+<Card title="PUT /todos/todo-lists/{list_id}" icon="pen">
+  Update an existing todo list
+</Card>
+
+### Path Parameters
+
+<ParamField path="list_id" type="string" required>
+  UUID of the list to update
+</ParamField>
+
+### Request Body
+
+All fields are optional. Only provided fields will be updated.
+
+<ParamField body="name" type="string">
+  New list name (max 100 characters, will be encrypted)
+</ParamField>
+
+<ParamField body="color" type="string">
+  New hex color code matching pattern `^#[0-9a-fA-F]{6}$`
+</ParamField>
+
+<ParamField body="order" type="integer">
+  New sort order
+</ParamField>
+
+### Response
+
+Returns the updated todo list object.
+
+### Example Request
+
+```bash
+curl -X PUT https://api.chronoscalendar.com/todos/todo-lists/456e7890-e12b-34d5-a678-901234567890 \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "Grocery Shopping",
+    "color": "#EF4444"
+  }'
+```
+
+### Example Response
+
+```json
+{
+  "id": "456e7890-e12b-34d5-a678-901234567890",
+  "userId": "user_123",
+  "name": "Grocery Shopping",
+  "color": "#EF4444",
+  "isSystem": false,
+  "order": -1
+}
+```
+
+### Error Responses
+
+<Expandable title="404 Not Found">
+  - List not found or doesn't belong to the user
+</Expandable>
+
+<Expandable title="400 Bad Request">
+  - Invalid color format
+  - Name exceeds 100 characters
+</Expandable>
+
+---
+
+## Delete Todo List
+
+<Card title="DELETE /todos/todo-lists/{list_id}" icon="trash">
+  Delete a todo list
+</Card>
+
+### Path Parameters
+
+<ParamField path="list_id" type="string" required>
+  UUID of the list to delete
+</ParamField>
+
+### Response
+
+<ResponseField name="message" type="string">
+  Confirmation message: "List deleted"
+</ResponseField>
+
+### Example Request
+
+```bash
+curl -X DELETE https://api.chronoscalendar.com/todos/todo-lists/456e7890-e12b-34d5-a678-901234567890 \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+### Example Response
+
+```json
+{
+  "message": "List deleted"
+}
+```
+
+### Error Responses
+
+<Expandable title="404 Not Found">
+  - List not found or doesn't belong to the user
+</Expandable>
+
+<Expandable title="400 Bad Request">
+  - Cannot delete system list (when `isSystem` is `true`)
+</Expandable>
+
+---
+
+## Reorder Lists
+
+<Card title="POST /todos/todo-lists/reorder" icon="arrows-up-down">
+  Reorder all todo lists at once
+</Card>
+
+### Request Body
+
+<ParamField body="categoryIds" type="array" required>
+  Array of list UUIDs in the desired order
+</ParamField>
+
+### Response
+
+<ResponseField name="message" type="string">
+  Confirmation message: "Reordered"
+</ResponseField>
+
+### Example Request
+
+```bash
+curl -X POST https://api.chronoscalendar.com/todos/todo-lists/reorder \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "categoryIds": [
+      "987fcdeb-51a2-43f1-b123-456789abcdef",
+      "123e4567-e89b-12d3-a456-426614174000",
+      "456e7890-e12b-34d5-a678-901234567890"
+    ]
+  }'
+```
+
+### Example Response
+
+```json
+{
+  "message": "Reordered"
+}
+```
+
+<Note>
+  The first UUID in the array will be assigned `order: 0`, the second `order: 1`, and so on.
+</Note>
+
+---
+
+## Data Security
+
+<Info>
+  **Encryption Details**: The `name` field is encrypted using AES-GCM (256-bit) with:
+  - User-specific keys derived via HKDF-SHA256
+  - 12-byte random IV per encryption
+  - Additional authenticated data (AAD) includes user ID
+  - System lists skip encryption for performance
+</Info>
+
+## Rate Limiting
+
+All endpoints are subject to the API rate limit configured in application settings. Exceeding the rate limit will return a `429 Too Many Requests` response.

@@ -1,0 +1,285 @@
+---
+title: 'Architecture Overview'
+description: 'High-level system architecture and design principles of Chronos Calendar'
+icon: 'sitemap'
+---
+
+## System Architecture
+
+Chronos Calendar is a modern full-stack SaaS application built with a **React frontend** and **FastAPI backend**, leveraging **Supabase** for authentication and database, with **Google Calendar** integration for real-time synchronization.
+
+<CardGroup cols={2}>
+  <Card title="Frontend" icon="browser" href="/architecture/frontend">
+    React 18 with Zustand state management and IndexedDB for offline-first experience
+  </Card>
+  <Card title="Backend" icon="server" href="/architecture/backend">
+    FastAPI REST API with Supabase PostgreSQL and Google Calendar OAuth integration
+  </Card>
+  <Card title="Security" icon="shield" href="/architecture/security">
+    Multi-layered security with encryption, CSRF protection, and secure session management
+  </Card>
+  <Card title="Real-time Sync" icon="arrows-rotate">
+    Bidirectional sync between local IndexedDB and Google Calendar via webhooks
+  </Card>
+</CardGroup>
+
+## Architecture Diagram
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                         CLIENT LAYER                            │
+├─────────────────────────────────────────────────────────────────┤
+│  React 18 + TypeScript                                          │
+│  ├─ Zustand (State Management)                                  │
+│  ├─ React Query (Server State)                                  │
+│  ├─ IndexedDB via Dexie.js (Local Storage)                      │
+│  └─ React Router (Navigation)                                   │
+└─────────────────┬───────────────────────────────────────────────┘
+                  │ HTTPS + CORS + CSRF
+                  │
+┌─────────────────┴───────────────────────────────────────────────┐
+│                      API GATEWAY LAYER                          │
+├─────────────────────────────────────────────────────────────────┤
+│  FastAPI REST API                                               │
+│  ├─ Security Middlewares (CSRF, Origin, Fetch Metadata)        │
+│  ├─ Rate Limiting (SlowAPI)                                     │
+│  ├─ GZIP Compression                                            │
+│  └─ Session Management                                          │
+└─────────────────┬───────────────────────────────────────────────┘
+                  │
+        ┌─────────┴──────────┐
+        │                    │
+┌───────▼──────┐    ┌────────▼──────────┐
+│  Supabase    │    │  Google Calendar  │
+│              │    │                   │
+│ PostgreSQL   │    │  OAuth 2.0        │
+│ Auth         │    │  Calendar API     │
+│ Storage      │    │  Webhooks         │
+└──────────────┘    └───────────────────┘
+```
+
+## Core Technology Stack
+
+<Tabs>
+  <Tab title="Frontend">
+    - **Framework**: React 18.3.1 with TypeScript
+    - **State Management**: Zustand 5.0.9
+    - **Server State**: TanStack Query 5.90
+    - **Local Database**: Dexie.js 4.2.1 (IndexedDB wrapper)
+    - **UI Components**: Radix UI primitives
+    - **Styling**: Tailwind CSS 4.1
+    - **Date Handling**: date-fns 4.1.0 + rrule 2.8.1
+    - **Build Tool**: Vite 5.4
+  </Tab>
+  <Tab title="Backend">
+    - **Framework**: FastAPI with Uvicorn
+    - **Database**: Supabase (PostgreSQL)
+    - **Authentication**: Supabase Auth + Google OAuth 2.0
+    - **Encryption**: cryptography library (AES-GCM)
+    - **Rate Limiting**: SlowAPI
+    - **HTTP Client**: HTTPX for async requests
+    - **Validation**: Pydantic 2.x
+    - **AI/Embeddings**: Cerebras Cloud SDK + FastEmbed
+  </Tab>
+  <Tab title="Infrastructure">
+    - **Hosting**: Cloud platform (production)
+    - **Database**: Supabase managed PostgreSQL
+    - **External APIs**: Google Calendar API v3
+    - **Real-time**: Google Calendar Push Notifications (webhooks)
+    - **Session Storage**: HTTP-only cookies with secure flags
+  </Tab>
+</Tabs>
+
+## Design Principles
+
+### 1. Offline-First Architecture
+
+Chronos Calendar uses an **offline-first approach** where all calendar data is stored locally in IndexedDB. This provides:
+
+- Instant UI responsiveness
+- Offline functionality
+- Reduced API calls
+- Better user experience with optimistic updates
+
+<Info>
+  The app syncs with Google Calendar in the background, ensuring data consistency while maintaining fast local operations.
+</Info>
+
+### 2. Security by Design
+
+Multiple layers of security protect user data:
+
+- **End-to-end encryption** for sensitive calendar fields
+- **CSRF token validation** on all mutating requests
+- **Origin validation** and Fetch Metadata Policy
+- **Rate limiting** on authentication endpoints
+- **Secure session management** with HTTP-only cookies
+
+See the [Security Architecture](/architecture/security) page for details.
+
+### 3. Real-time Synchronization
+
+Bidirectional sync keeps data consistent across devices:
+
+1. **Client → Server**: Local changes pushed via REST API
+2. **Server → Client**: Google Calendar webhooks notify of external changes
+3. **Conflict Resolution**: Last-write-wins based on `updated` timestamp
+
+<Note>
+  Webhooks are registered per calendar and automatically renewed before expiration.
+</Note>
+
+### 4. Scalable State Management
+
+State is organized into specialized Zustand stores:
+
+- **Calendar Store**: View state, navigation, selected events
+- **Accounts Store**: Google account management
+- **Sync Store**: Synchronization status tracking
+- **Todo Store**: Task list selection and editing
+
+This modular approach keeps state logic isolated and testable.
+
+## Data Flow
+
+### Event Synchronization Flow
+
+```
+1. User creates event in UI
+   ↓
+2. Optimistically update IndexedDB
+   ↓
+3. Update UI immediately (Dexie hooks)
+   ↓
+4. POST /calendar/events → Backend
+   ↓
+5. Backend → Google Calendar API
+   ↓
+6. Google Calendar returns event with ID
+   ↓
+7. Backend stores encrypted data in Supabase
+   ↓
+8. Response → Frontend
+   ↓
+9. Update IndexedDB with server response
+```
+
+### Webhook Update Flow
+
+```
+1. External change in Google Calendar
+   ↓
+2. Google sends webhook to /calendar/webhook
+   ↓
+3. Backend validates webhook signature
+   ↓
+4. Backend fetches updated events from Google
+   ↓
+5. Backend encrypts and stores in Supabase
+   ↓
+6. Next time client syncs, fetches updated data
+   ↓
+7. Client merges changes into IndexedDB
+   ↓
+8. UI updates automatically via Dexie hooks
+```
+
+## API Structure
+
+The backend exposes three main router modules:
+
+<CardGroup cols={3}>
+  <Card title="/auth" icon="key">
+    OAuth flow, session management, CSRF tokens
+  </Card>
+  <Card title="/calendar" icon="calendar">
+    Events, calendars, accounts, webhooks, sync
+  </Card>
+  <Card title="/todos" icon="list-check">
+    Todo lists and items management
+  </Card>
+</CardGroup>
+
+### Key Endpoints
+
+- `GET /health` - Health check
+- `POST /auth/web/login` - Initiate OAuth flow
+- `GET /auth/web/callback` - OAuth callback
+- `POST /auth/logout` - Clear session
+- `GET /calendar/events` - Fetch events with sync token
+- `POST /calendar/events` - Create event
+- `PUT /calendar/events/{id}` - Update event
+- `DELETE /calendar/events/{id}` - Delete event
+- `POST /calendar/webhook` - Google Calendar webhook receiver
+
+See [Backend Architecture](/architecture/backend) for complete API documentation.
+
+## Performance Optimizations
+
+### Frontend
+
+- **Virtual scrolling** for large event lists (TanStack Virtual)
+- **Lazy loading** components with React.lazy
+- **Debounced search** and input handlers
+- **Memoized selectors** in Zustand stores
+- **Query caching** with TanStack Query
+
+### Backend
+
+- **GZIP compression** for responses >1KB
+- **Batch encryption/decryption** for multiple fields
+- **Connection pooling** via HTTPX async client
+- **Indexed database queries** on Supabase
+- **Rate limiting** to prevent abuse
+
+## Deployment Architecture
+
+<Tabs>
+  <Tab title="Web Application">
+    - Frontend built with Vite and deployed as static assets
+    - Backend deployed as FastAPI application with Uvicorn
+    - Environment-specific configuration via `.env` files
+    - CORS configured for production domains
+    - HTTPS enforced in production
+  </Tab>
+  <Tab title="Desktop Application">
+    - Electron-based wrapper (Electrobun)
+    - Same React frontend codebase
+    - Local proxy server for OAuth redirect
+    - Desktop-specific environment variables
+    - Built with Bun for fast development
+  </Tab>
+</Tabs>
+
+## Configuration Management
+
+All sensitive configuration is managed through environment variables:
+
+```python
+class Settings(BaseSettings):
+    SUPABASE_URL: str
+    SUPABASE_SERVICE_ROLE_KEY: str
+    ENCRYPTION_MASTER_KEY: str
+    CSRF_SECRET_KEY: str
+    GOOGLE_CLIENT_ID: str
+    GOOGLE_CLIENT_SECRET: str
+    FRONTEND_URL: str
+    CORS_ORIGINS: str
+    # ... more settings
+```
+
+Settings are validated at startup with Pydantic, ensuring required values are present and security invariants are enforced (e.g., `COOKIE_SECURE=true` in production).
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Frontend Architecture" icon="browser" href="/architecture/frontend">
+    Deep dive into React components, state management, and IndexedDB
+  </Card>
+  <Card title="Backend Architecture" icon="server" href="/architecture/backend">
+    Explore FastAPI routers, Supabase integration, and Google Calendar sync
+  </Card>
+  <Card title="Security Features" icon="shield" href="/architecture/security">
+    Learn about encryption, CSRF protection, and session management
+  </Card>
+</CardGroup>

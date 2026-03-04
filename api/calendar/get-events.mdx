@@ -1,0 +1,246 @@
+---
+title: "Get Events"
+api: "GET /calendar/events"
+description: "Retrieve decrypted calendar events from local storage"
+---
+
+## Endpoint
+
+```
+GET /calendar/events
+```
+
+Retrieves calendar events from the local encrypted database. Events are decrypted using the user's encryption key before being returned. This endpoint returns cached events and does not sync with Google Calendar.
+
+## Authentication
+
+Requires a valid authentication token in the request headers.
+
+## Query Parameters
+
+<ParamField query="calendar_ids" type="string">
+  Optional comma-separated list of calendar IDs to filter events. If not provided, returns events from all user's calendars.
+  
+  Maximum 20 calendar IDs per request.
+  
+  Example: `cal_abc123,cal_def456`
+</ParamField>
+
+## Response
+
+Returns three arrays of events categorized by type:
+
+<ResponseField name="events" type="array" required>
+  Regular (non-recurring) calendar events
+  
+  <Expandable title="event object">
+    <ResponseField name="id" type="string" required>
+      Event ID
+    </ResponseField>
+    
+    <ResponseField name="google_event_id" type="string">
+      Google Calendar event ID
+    </ResponseField>
+    
+    <ResponseField name="calendar_id" type="string" required>
+      Calendar ID this event belongs to
+    </ResponseField>
+    
+    <ResponseField name="summary" type="string">
+      Event title/summary
+    </ResponseField>
+    
+    <ResponseField name="description" type="string">
+      Event description (decrypted)
+    </ResponseField>
+    
+    <ResponseField name="location" type="string">
+      Event location (decrypted)
+    </ResponseField>
+    
+    <ResponseField name="start" type="object">
+      Start date/time information
+    </ResponseField>
+    
+    <ResponseField name="end" type="object">
+      End date/time information
+    </ResponseField>
+    
+    <ResponseField name="status" type="string">
+      Event status (confirmed, tentative, cancelled)
+    </ResponseField>
+    
+    <ResponseField name="color" type="string">
+      Event or calendar color
+    </ResponseField>
+    
+    <ResponseField name="created_at" type="string">
+      ISO 8601 timestamp when event was created
+    </ResponseField>
+    
+    <ResponseField name="updated_at" type="string">
+      ISO 8601 timestamp when event was last updated
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+<ResponseField name="masters" type="array" required>
+  Master events for recurring series. These define the recurrence pattern but don't represent individual instances.
+  
+  <Expandable title="master event object">
+    <ResponseField name="recurrence" type="array">
+      Array of RRULE strings defining recurrence pattern
+    </ResponseField>
+    
+    <i>Contains all fields from regular events plus recurrence information</i>
+  </Expandable>
+</ResponseField>
+
+<ResponseField name="exceptions" type="array" required>
+  Exception events - modified or cancelled instances of recurring events
+  
+  <Expandable title="exception event object">
+    <ResponseField name="recurring_event_id" type="string">
+      ID of the master recurring event
+    </ResponseField>
+    
+    <ResponseField name="original_start_time" type="object">
+      Original start time of the recurring instance
+    </ResponseField>
+    
+    <i>Contains all fields from regular events plus recurring event reference</i>
+  </Expandable>
+</ResponseField>
+
+## Decryption Process
+
+1. Events are stored encrypted in the database
+2. User's encryption key is derived from their user ID
+3. Events are decrypted in parallel using thread pool (up to 8 workers)
+4. Decrypted events include sensitive fields: `summary`, `description`, `location`
+
+## Example Request
+
+```bash cURL
+curl -X GET "https://api.chronoscalendar.com/calendar/events?calendar_ids=cal_abc123" \
+  -H "Authorization: Bearer YOUR_ACCESS_TOKEN"
+```
+
+```bash All Calendars
+curl -X GET "https://api.chronoscalendar.com/calendar/events" \
+  -H "Authorization: Bearer YOUR_ACCESS_TOKEN"
+```
+
+## Example Response
+
+```json
+{
+  "events": [
+    {
+      "id": "evt_123",
+      "google_event_id": "abc123xyz",
+      "calendar_id": "cal_abc123",
+      "summary": "Team Meeting",
+      "description": "Discuss Q2 roadmap",
+      "location": "Conference Room A",
+      "start": {
+        "dateTime": "2026-03-05T14:00:00Z",
+        "timeZone": "America/New_York"
+      },
+      "end": {
+        "dateTime": "2026-03-05T15:00:00Z",
+        "timeZone": "America/New_York"
+      },
+      "status": "confirmed",
+      "color": "#9fe1e7",
+      "created_at": "2026-03-01T10:00:00Z",
+      "updated_at": "2026-03-02T12:30:00Z"
+    }
+  ],
+  "masters": [
+    {
+      "id": "evt_456",
+      "google_event_id": "def456uvw",
+      "calendar_id": "cal_abc123",
+      "summary": "Weekly Standup",
+      "start": {
+        "dateTime": "2026-03-03T09:00:00Z",
+        "timeZone": "America/New_York"
+      },
+      "end": {
+        "dateTime": "2026-03-03T09:30:00Z",
+        "timeZone": "America/New_York"
+      },
+      "recurrence": [
+        "RRULE:FREQ=WEEKLY;BYDAY=MO,WE,FR"
+      ],
+      "status": "confirmed"
+    }
+  ],
+  "exceptions": [
+    {
+      "id": "evt_789",
+      "google_event_id": "ghi789rst_20260305T090000Z",
+      "calendar_id": "cal_abc123",
+      "recurring_event_id": "ghi789rst",
+      "original_start_time": {
+        "dateTime": "2026-03-05T09:00:00Z"
+      },
+      "summary": "Weekly Standup - CANCELLED",
+      "status": "cancelled"
+    }
+  ]
+}
+```
+
+## Empty Response
+
+If no events are found or no calendars are specified:
+
+```json
+{
+  "events": [],
+  "masters": [],
+  "exceptions": []
+}
+```
+
+## Performance Considerations
+
+- **Parallel Decryption**: Events are decrypted concurrently using ThreadPoolExecutor
+- **Worker Threads**: Up to 8 workers (based on CPU count)
+- **Database Queries**: Optimized with separate queries for events, masters, and exceptions
+- **Filtered by Status**: Automatically excludes cancelled regular events
+
+## Error Responses
+
+<ResponseField name="400 Bad Request">
+  Invalid `calendar_ids` parameter (more than 20 calendars)
+</ResponseField>
+
+<ResponseField name="401 Unauthorized">
+  Authentication token is missing or invalid
+</ResponseField>
+
+<ResponseField name="500 Internal Server Error">
+  Decryption failed or database error occurred
+</ResponseField>
+
+## Use Cases
+
+- **Initial Load**: Fetch cached events on app startup
+- **Offline Access**: Access events without Google Calendar connection
+- **Quick Retrieval**: Get events faster than syncing from Google
+- **Calendar Filtering**: View events from specific calendars only
+
+## Related Endpoints
+
+- [Sync Events](/api/calendar/sync-events) - Sync latest events from Google Calendar
+- [List Calendars](/api/calendar/list-calendars) - Get available calendar IDs
+
+## Source Code Reference
+
+See implementation in:
+- `backend/app/routers/calendar.py:67-102` (endpoint handler)
+- `backend/app/calendar/db.py:257-295` (database queries)
+- `backend/app/calendar/helpers.py` (decryption logic)

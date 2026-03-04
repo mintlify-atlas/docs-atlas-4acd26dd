@@ -1,0 +1,247 @@
+---
+title: "Refresh Session"
+api: "POST /auth/refresh"
+description: "Refreshes an expired session using the refresh token cookie, returning a new access token and updated user data."
+---
+
+## Request
+
+### Cookies
+
+This endpoint requires the refresh token cookie set during authentication. No request body is needed.
+
+<ParamField cookie="refresh_token" type="string" required>
+  The refresh token cookie (name configured via `REFRESH_COOKIE_NAME`). This is automatically sent by the browser when making the request with `credentials: 'include'`.
+</ParamField>
+
+## Response
+
+<ResponseField name="user" type="object" required>
+  The authenticated user's current profile information
+  
+  <Expandable title="User Object">
+    <ResponseField name="id" type="string" required>
+      Unique user identifier (UUID format)
+    </ResponseField>
+    
+    <ResponseField name="email" type="string" required>
+      User's email address
+    </ResponseField>
+    
+    <ResponseField name="name" type="string">
+      User's full name
+    </ResponseField>
+    
+    <ResponseField name="avatar_url" type="string">
+      URL to user's profile picture
+    </ResponseField>
+    
+    <ResponseField name="created_at" type="string" required>
+      ISO 8601 timestamp of when the user account was created
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+<ResponseField name="expires_at" type="integer" required>
+  Unix timestamp (in seconds) when the new session expires
+</ResponseField>
+
+<RequestExample>
+
+```bash cURL
+curl -X POST "https://api.chronos.app/auth/refresh" \
+  -H "Accept: application/json" \
+  -b "__Host-refresh=eyJhbG..."
+```
+
+```javascript JavaScript
+const response = await fetch('https://api.chronos.app/auth/refresh', {
+  method: 'POST',
+  headers: {
+    'Accept': 'application/json',
+  },
+  credentials: 'include' // Required to send refresh token cookie
+});
+
+const data = await response.json();
+```
+
+</RequestExample>
+
+<ResponseExample>
+
+```json 200 Success
+{
+  "user": {
+    "id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+    "email": "user@example.com",
+    "name": "Jane Doe",
+    "avatar_url": "https://lh3.googleusercontent.com/a/...",
+    "created_at": "2026-03-04T10:30:00.000Z"
+  },
+  "expires_at": 1709556600
+}
+```
+
+```json 401 Not Authenticated
+{
+  "detail": "Not authenticated"
+}
+```
+
+```json 401 Token Revoked
+{
+  "detail": "Refresh token revoked"
+}
+```
+
+```json 401 Refresh Failed
+{
+  "detail": "Refresh failed"
+}
+```
+
+</ResponseExample>
+
+## Cookies Updated
+
+This endpoint updates the session cookies with new values:
+
+<ResponseField name="session_token" type="cookie">
+  Updated session cookie with new access token
+  - **HttpOnly**: Yes
+  - **Secure**: Yes (production)
+  - **SameSite**: Lax or Strict (production)
+</ResponseField>
+
+<ResponseField name="refresh_token" type="cookie">
+  Updated refresh token cookie (if token rotation occurred)
+  - **HttpOnly**: Yes
+  - **Secure**: Yes (production)
+  - **SameSite**: Lax or Strict (production)
+</ResponseField>
+
+<ResponseField name="csrf_token" type="cookie">
+  Fresh CSRF token for the new session
+</ResponseField>
+
+## Error Codes
+
+<ResponseField name="401" type="error">
+  Unauthorized - One of the following occurred:
+  - No refresh token cookie present
+  - Refresh token has been revoked
+  - Refresh token is invalid or expired
+  - Failed to retrieve user data
+</ResponseField>
+
+<ResponseField name="429" type="error">
+  Rate Limit Exceeded - Too many refresh requests from this IP address
+</ResponseField>
+
+## Rate Limits
+
+This endpoint is rate-limited according to the `RATE_LIMIT_AUTH` configuration. The rate limiter uses the client's IP address as the key.
+
+## Implementation Details
+
+### Refresh Flow
+
+1. **Token Validation**: Checks if refresh token exists in request cookies
+2. **Revocation Check**: Verifies the refresh token hasn't been revoked in the database
+3. **Session Refresh**: Calls Supabase Auth to refresh the session
+4. **Token Rotation**: If Supabase returns a new refresh token:
+   - Revokes the old refresh token in the database
+   - Updates cookies with new refresh token
+5. **Cookie Update**: Sets new session cookies (access token, refresh token, CSRF token)
+6. **User Data**: Fetches and returns current user profile
+
+### Token Rotation
+
+Supabase may rotate refresh tokens based on its security policies. When rotation occurs:
+- The old refresh token is immediately revoked with expiration set to current time
+- The new refresh token is stored in cookies
+- Token revocation is tracked in the `revoked_tokens` table
+
+### Revocation Tracking
+
+Revoked tokens are stored with:
+- Token hash (for lookup)
+- Token type (`refresh`)
+- User ID
+- Expiration timestamp
+- Revocation reason
+
+This prevents reuse of old refresh tokens even if intercepted.
+
+## Security Notes
+
+- Refresh tokens are stored as HTTP-only cookies, preventing JavaScript access
+- Token revocation ensures old refresh tokens cannot be reused
+- Each refresh generates a fresh CSRF token
+- Failed refresh attempts do not reveal whether the token was invalid or revoked
+- All token operations are logged for security auditing
+
+## Usage Pattern
+
+<CodeGroup>
+
+```javascript Automatic Refresh
+// Check if session is expiring soon (e.g., within 5 minutes)
+function shouldRefreshSession(expiresAt) {
+  const now = Math.floor(Date.now() / 1000);
+  const fiveMinutes = 5 * 60;
+  return expiresAt - now < fiveMinutes;
+}
+
+// Refresh session before it expires
+async function ensureValidSession(expiresAt) {
+  if (shouldRefreshSession(expiresAt)) {
+    const response = await fetch('/auth/refresh', {
+      method: 'POST',
+      credentials: 'include'
+    });
+    
+    if (response.ok) {
+      const data = await response.json();
+      return data.expires_at;
+    }
+  }
+  return expiresAt;
+}
+```
+
+```javascript Error Handling
+async function refreshSession() {
+  try {
+    const response = await fetch('/auth/refresh', {
+      method: 'POST',
+      credentials: 'include'
+    });
+    
+    if (response.status === 401) {
+      // Refresh token expired or revoked - redirect to login
+      window.location.href = '/login';
+      return null;
+    }
+    
+    if (!response.ok) {
+      throw new Error('Refresh failed');
+    }
+    
+    return await response.json();
+  } catch (error) {
+    console.error('Session refresh error:', error);
+    // Handle network errors
+    return null;
+  }
+}
+```
+
+</CodeGroup>
+
+<Tip>
+**Best Practice**: Implement automatic session refresh in your application by checking `expires_at` before making API requests. Refresh the session proactively when it's within 5 minutes of expiring to ensure uninterrupted access.
+</Tip>
+
+Source: `backend/app/routers/auth.py:220-263`
