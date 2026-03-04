@@ -1,0 +1,114 @@
+{
+  "projectType": "saas",
+  "projectName": "Chronos Calendar",
+  "projectDescription": "A full-stack calendar application with Google Calendar sync, todo management, and real-time updates.",
+  "theme": "almond",
+  "primaryColor": "#8b5cf6",
+  "lightColor": "#a78bfa",
+  "darkColor": "#7c3aed",
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Getting Started",
+            "pages": [
+              "introduction",
+              "quickstart",
+              "installation"
+            ]
+          },
+          {
+            "group": "Features",
+            "pages": [
+              "features/calendar-sync",
+              "features/events",
+              "features/todos",
+              "features/recurring-events",
+              "features/real-time-sync"
+            ]
+          },
+          {
+            "group": "User Guide",
+            "pages": [
+              "guide/authentication",
+              "guide/managing-calendars",
+              "guide/creating-events",
+              "guide/organizing-todos",
+              "guide/desktop-app"
+            ]
+          },
+          {
+            "group": "Architecture",
+            "pages": [
+              "architecture/overview",
+              "architecture/frontend",
+              "architecture/backend",
+              "architecture/security"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "API Reference",
+        "groups": [
+          {
+            "group": "Authentication",
+            "pages": [
+              "api/auth/login",
+              "api/auth/callback",
+              "api/auth/refresh",
+              "api/auth/logout"
+            ]
+          },
+          {
+            "group": "Calendar",
+            "pages": [
+              "api/calendar/list-calendars",
+              "api/calendar/sync-events",
+              "api/calendar/get-events",
+              "api/calendar/webhook"
+            ]
+          },
+          {
+            "group": "Todos",
+            "pages": [
+              "api/todos/lists",
+              "api/todos/items",
+              "api/todos/categories",
+              "api/todos/reorder"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "keyFeatures": [
+    "Google Calendar integration with OAuth 2.0",
+    "Real-time event synchronization via Server-Sent Events",
+    "Todo list management with categories and scheduling",
+    "Recurring events support with rrule",
+    "End-to-end encryption for sensitive data",
+    "Desktop application support with Electrobun",
+    "Offline-first architecture with IndexedDB",
+    "Calendar visibility controls and filtering"
+  ],
+  "publicApiSurface": [
+    "POST /auth/google/login - Initiate Google OAuth login",
+    "GET /auth/google/callback - Handle OAuth callback",
+    "POST /auth/refresh - Refresh access tokens",
+    "POST /auth/logout - Logout and clear session",
+    "GET /calendar/google/calendars - List Google calendars",
+    "POST /calendar/google/sync - Sync calendar events",
+    "GET /calendar/events - Query cached events (SSE)",
+    "POST /calendar/webhook - Handle Google Calendar webhooks",
+    "GET /todos/lists - Get todo lists",
+    "POST /todos/lists - Create todo list",
+    "GET /todos/items - Get todo items",
+    "POST /todos/items - Create todo item",
+    "PATCH /todos/items/{id} - Update todo item",
+    "DELETE /todos/items/{id} - Delete todo item",
+    "POST /todos/reorder - Reorder todos"
+  ]
+}
